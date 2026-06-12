@@ -1,0 +1,121 @@
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800&display=swap');
+
+:root {
+  --bg: #F0F4FF;
+  --surface: #FFFFFF;
+  --border: #E2E8FF;
+  --primary: #6C7FD8;
+  --primary-soft: #EEF0FF;
+  --warn: #F4A261;
+  --warn-soft: #FFF4EC;
+  --danger: #E07070;
+  --danger-soft: #FFEAEA;
+  --success: #72B69C;
+  --success-soft: #EDFAF5;
+  --text-primary: #2D2D3A;
+  --text-secondary: #8A8A9A;
+  --text-disabled: #C4C4D4;
+  --timer-grad: linear-gradient(90deg, #6C7FD8, #A78BFA);
+
+  --radius-card: 16px;
+  --radius-btn: 10px;
+  --radius-badge: 8px;
+
+  --shadow-card: 0 4px 24px rgba(108, 127, 216, 0.08);
+  --shadow-btn-hover: 0 4px 12px rgba(108, 127, 216, 0.2);
+
+  --transition-default: all 300ms ease;
+  --transition-fast: all 150ms ease;
+  
+  --spacing-1: 4px;
+  --spacing-2: 8px;
+  --spacing-3: 12px;
+  --spacing-4: 16px;
+  --spacing-6: 24px;
+  --spacing-8: 32px;
+  --spacing-12: 48px;
+  --spacing-16: 64px;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Montserrat', sans-serif;
+  background-color: var(--bg);
+  color: var(--text-primary);
+  line-height: 1.5;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  outline: none;
+  background: none;
+  transition: var(--transition-default);
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* Animations */
+@keyframes slideUpFade {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-slide-up {
+  animation: slideUpFade 300ms ease forwards;
+}
+
+@keyframes pulse-subtle {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.02); }
+  100% { transform: scale(1); }
+}
+
+.animate-pulse-once {
+  animation: pulse-subtle 300ms ease;
+}
+
+@keyframes flash-warn {
+  0% { color: var(--text-primary); }
+  50% { color: var(--warn); }
+  100% { color: var(--text-primary); }
+}
+
+@keyframes flash-danger {
+  0% { color: var(--danger); transform: scale(1); }
+  50% { color: var(--danger); transform: scale(1.05); }
+  100% { color: var(--danger); transform: scale(1); }
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-disabled);
+}
