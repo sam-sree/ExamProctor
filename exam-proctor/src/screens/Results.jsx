@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useExamStore } from '../store/examStore';
 import { useProctoringStore } from '../store/proctoringStore';
 import SectionBar from '../components/charts/SectionBar';
@@ -8,51 +8,105 @@ import { QUESTIONS } from '../App';
 import { AlertTriangle, Download, LogOut, Check, X, Circle } from 'lucide-react';
 
 export default function Results() {
-  const answers = useExamStore(state => state.answers);
-  const status = useExamStore(state => state.status);
-  const warningLog = useProctoringStore(state => state.warningLog);
-  const warningCount = useProctoringStore(state => state.warningCount);
-  
-  // Compute scores for MCQ
+  const localSessionId = useExamStore(state => state.sessionId);
+  const localAnswers = useExamStore(state => state.answers);
+  const localStatus = useExamStore(state => state.status);
+  const localWarningLog = useProctoringStore(state => state.warningLog);
+  const localWarningCount = useProctoringStore(state => state.warningCount);
+
+  const [serverData, setServerData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchResult = async () => {
+      try {
+        const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+        const res = await fetch(`${apiBase}/api/session/${localSessionId}/result`);
+        if (res.ok) {
+          const data = await res.json();
+          setServerData(data);
+        }
+      } catch (err) {
+        console.error("Error fetching session result:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchResult();
+  }, [localSessionId]);
+
+  // Derive display values from server if available, otherwise fallback to local Zustand store
+  const answers = serverData?.answers || localAnswers;
+  const status = serverData?.status || localStatus;
+  const warningLog = serverData?.warningLog || localWarningLog;
+  const warningCount = serverData?.warningLog ? serverData.warningLog.length : localWarningCount;
+
+  // MCQ scoring
   const mcqQuestions = QUESTIONS.filter(q => q.type === 'mcq');
   let correct = 0, incorrect = 0, skipped = 0;
   
-  mcqQuestions.forEach(q => {
-    const ans = answers.find(a => a.questionId === q.id);
-    if (!ans || ans.skipped) {
-      skipped++;
-    } else if (ans.answer === q.correct) {
-      correct++;
-    } else {
-      incorrect++;
-    }
-  });
+  if (serverData?.score?.mcq !== undefined) {
+    correct = serverData.score.mcq;
+    // Calculate others
+    mcqQuestions.forEach(q => {
+      const ans = answers.find(a => a.questionId === q.id);
+      if (!ans || ans.skipped) {
+        skipped++;
+      } else if (ans.answer !== q.correct) {
+        incorrect++;
+      }
+    });
+  } else {
+    // Local calculation fallback
+    mcqQuestions.forEach(q => {
+      const ans = answers.find(a => a.questionId === q.id);
+      if (!ans || ans.skipped) {
+        skipped++;
+      } else if (ans.answer === q.correct) {
+        correct++;
+      } else {
+        incorrect++;
+      }
+    });
+  }
 
-  const textQuestions = QUESTIONS.filter(q => q.type === 'text');
-  const totalTimeSpent = answers.reduce((sum, a) => sum + a.timeSpent, 0);
+  const totalTimeSpent = answers.reduce((sum, a) => sum + (a.timeSpent || 0), 0);
 
-  const handleDownload = async () => {
-    // In a real electron app we'd use dialog.showSaveDialog from main process
+  const handleDownload = () => {
     const report = {
-      session: useExamStore.getState(),
-      proctoring: useProctoringStore.getState()
+      session: serverData || {
+        sessionId: localSessionId,
+        candidateId: useExamStore.getState().candidateId,
+        testId: useExamStore.getState().testId,
+        startTime: useExamStore.getState().startTime,
+        endTime: useExamStore.getState().endTime,
+        status: localStatus,
+        answers: localAnswers,
+        webcamSnapshotLog: useExamStore.getState().webcamSnapshotLog
+      },
+      proctoring: {
+        warningCount: localWarningCount,
+        warningLog: localWarningLog,
+        shortcutAttemptLog: useProctoringStore.getState().shortcutAttemptLog,
+        logOnlyEvents: useProctoringStore.getState().logOnlyEvents,
+        multiMonitorSuspected: useProctoringStore.getState().multiMonitorSuspected,
+        bluetoothDeviceDetected: useProctoringStore.getState().bluetoothDeviceDetected,
+        detectedBluetoothDevices: useProctoringStore.getState().detectedBluetoothDevices,
+        disqualified: useProctoringStore.getState().disqualified
+      }
     };
     
     const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `exam-report-${new Date().getTime()}.json`;
+    a.download = `exam-report-${localSessionId}-${new Date().getTime()}.json`;
     a.click();
   };
 
   const handleExit = () => {
-    if (window.electronAPI) {
-      // Typically app.quit() is called via IPC, let's mock it
-      window.close(); // For dev/browser fallback
-    } else {
-      window.close();
-    }
+    // Navigate away or close window
+    window.location.reload(); // Restarts the demo/assessment flow safely in browser
   };
 
   return (
@@ -119,33 +173,33 @@ export default function Results() {
           
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
              {mcqQuestions.map((q, i) => {
-               const ans = answers.find(a => a.questionId === q.id);
-               const isCorrect = ans && !ans.skipped && ans.answer === q.correct;
-               const isSkipped = !ans || ans.skipped;
-               return (
-                 <details key={q.id} style={{ background: 'var(--bg)', borderRadius: '10px', overflow: 'hidden' }}>
-                    <summary style={{ padding: '16px', display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', fontWeight: 600, userSelect: 'none' }}>
-                      {isCorrect ? <Check size={18} color="var(--success)" /> : isSkipped ? <Circle size={18} color="var(--text-disabled)" /> : <X size={18} color="var(--danger)" />}
-                      <span>Q{i + 1} · {isCorrect ? 'Correct' : isSkipped ? 'Skipped' : 'Incorrect'}</span>
-                    </summary>
-                    <div style={{ padding: '0 16px 16px 46px', color: 'var(--text-secondary)' }}>
-                      <p style={{ marginBottom: '12px', color: 'var(--text-primary)' }}>{q.text}</p>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                        {q.options.map((opt, oIdx) => (
-                          <div key={oIdx} style={{ 
-                            padding: '8px 12px', 
-                            borderRadius: '6px', 
-                            background: oIdx === q.correct ? 'var(--success-soft)' : (ans && ans.answer === oIdx && !isCorrect) ? 'var(--danger-soft)' : 'transparent',
-                            color: oIdx === q.correct ? 'var(--success)' : (ans && ans.answer === oIdx && !isCorrect) ? 'var(--danger)' : 'inherit',
-                            fontWeight: oIdx === q.correct ? 600 : 400
-                          }}>
-                            {['A','B','C','D'][oIdx]}. {opt}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                 </details>
-               );
+                const ans = answers.find(a => a.questionId === q.id);
+                const isCorrect = ans && !ans.skipped && ans.answer === q.correct;
+                const isSkipped = !ans || ans.skipped;
+                return (
+                  <details key={q.id} style={{ background: 'var(--bg)', borderRadius: '10px', overflow: 'hidden' }}>
+                     <summary style={{ padding: '16px', display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', fontWeight: 600, userSelect: 'none' }}>
+                       {isCorrect ? <Check size={18} color="var(--success)" /> : isSkipped ? <Circle size={18} color="var(--text-disabled)" /> : <X size={18} color="var(--danger)" />}
+                       <span>Q{i + 1} · {isCorrect ? 'Correct' : isSkipped ? 'Skipped' : 'Incorrect'}</span>
+                     </summary>
+                     <div style={{ padding: '0 16px 16px 46px', color: 'var(--text-secondary)' }}>
+                       <p style={{ marginBottom: '12px', color: 'var(--text-primary)' }}>{q.text}</p>
+                       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                         {q.options.map((opt, oIdx) => (
+                           <div key={oIdx} style={{ 
+                             padding: '8px 12px', 
+                             borderRadius: '6px', 
+                             background: oIdx === q.correct ? 'var(--success-soft)' : (ans && ans.answer === oIdx && !isCorrect) ? 'var(--danger-soft)' : 'transparent',
+                             color: oIdx === q.correct ? 'var(--success)' : (ans && ans.answer === oIdx && !isCorrect) ? 'var(--danger)' : 'inherit',
+                             fontWeight: oIdx === q.correct ? 600 : 400
+                           }}>
+                             {['A','B','C','D'][oIdx]}. {opt}
+                           </div>
+                         ))}
+                       </div>
+                     </div>
+                  </details>
+                );
              })}
           </div>
         </div>

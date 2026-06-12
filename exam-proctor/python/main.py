@@ -1,106 +1,212 @@
-import asyncio
-import websockets
-import json
-import argparse
-import threading
-from cv_pipeline import cv_main_loop
-from audio_monitor import audio_main_loop
-import sys
 import os
+import sys
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-# Globals for thread control
-cv_thread = None
-audio_thread = None
-cv_stop_event = threading.Event()
-audio_stop_event = threading.Event()
-clients = set()
-main_loop = None
+import base64
+import datetime
+import uuid
+import cv2
+import numpy as np
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import List, Dict, Any, Optional
+from cv_pipeline import CVPipeline
 
-def resource_path(relative_path):
-    """ Get absolute path to resource, works for dev and for PyInstaller """
-    try:
-        # PyInstaller creates a temp folder and stores path in _MEIPASS
-        base_path = sys._MEIPASS
-    except Exception:
-        base_path = os.path.abspath(".")
+app = FastAPI()
 
-    return os.path.join(base_path, relative_path)
+# Enable CORS for the React development frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-async def handle_client(websocket, path):
-    global cv_thread, audio_thread
+# In-memory database for sessions
+sessions: Dict[str, Dict[str, Any]] = {}
+
+# Active CV pipeline instances mapped by session_id
+cv_pipelines: Dict[str, CVPipeline] = {}
+
+class SessionCreate(BaseModel):
+    candidateId: str
+    testId: str
+
+class DisqualifyPayload(BaseModel):
+    warningLog: List[Dict[str, Any]]
+    webcamSnapshotLog: List[Dict[str, Any]]
+    shortcutAttemptLog: List[Dict[str, Any]]
+    multiMonitorSuspected: bool
+    bluetoothDeviceDetected: bool
+
+def calculate_mcq_score(answers: List[Dict[str, Any]]) -> int:
+    # Correct answer indices for questions 1-5
+    correct_answers = {1: 1, 2: 2, 3: 2, 4: 3, 5: 1}
+    mcq_score = 0
+    for ans in answers:
+        q_id = ans.get("questionId")
+        if q_id in correct_answers:
+            # Mark the correctness
+            is_correct = ans.get("answer") == correct_answers[q_id]
+            ans["isCorrect"] = is_correct
+            if is_correct:
+                mcq_score += 1
+    return mcq_score
+
+@app.post("/api/session/create")
+async def create_session(payload: SessionCreate):
+    session_id = str(uuid.uuid4())
+    sessions[session_id] = {
+        "sessionId": session_id,
+        "candidateId": payload.candidateId,
+        "testId": payload.testId,
+        "startTime": datetime.datetime.utcnow().isoformat() + "Z",
+        "endTime": None,
+        "status": "setup",
+        "answers": [],
+        "webcamSnapshotLog": [],
+        "shortcutAttemptLog": [],
+        "warningLog": [],
+        "logOnlyEvents": [],
+        "multiMonitorSuspected": False,
+        "bluetoothDeviceDetected": False,
+        "detectedBluetoothDevices": [],
+        "disqualified": False,
+        "score": {"mcq": 0, "text": "pending"}
+    }
+    # Instantiate the CV pipeline for this session
+    cv_pipelines[session_id] = CVPipeline()
+    return {"sessionId": session_id}
+
+@app.post("/api/session/{session_id}/submit")
+async def submit_session(session_id: str, payload: Dict[str, Any]):
+    if session_id not in sessions:
+        sessions[session_id] = {"sessionId": session_id}
     
-    clients.add(websocket)
-    print(f"Client connected. Total clients: {len(clients)}")
+    # Store complete exam session state
+    session_data = sessions[session_id]
+    session_data.update(payload)
+    session_data["status"] = "submitted"
+    session_data["endTime"] = datetime.datetime.utcnow().isoformat() + "Z"
+    
+    # Calculate MCQ score
+    mcq_score = calculate_mcq_score(session_data.get("answers", []))
+    session_data["score"] = {"mcq": mcq_score, "text": "pending"}
+    
+    # Clean up the CV pipeline
+    if session_id in cv_pipelines:
+        del cv_pipelines[session_id]
+        
+    return {"received": True}
+
+@app.post("/api/session/{session_id}/disqualify")
+async def disqualify_session(session_id: str, payload: DisqualifyPayload):
+    if session_id not in sessions:
+        sessions[session_id] = {"sessionId": session_id}
+        
+    session_data = sessions[session_id]
+    session_data.update(payload.dict())
+    session_data["status"] = "disqualified"
+    session_data["disqualified"] = True
+    session_data["endTime"] = datetime.datetime.utcnow().isoformat() + "Z"
+    
+    # Calculate MCQ score just in case they have answers
+    mcq_score = calculate_mcq_score(session_data.get("answers", []))
+    session_data["score"] = {"mcq": mcq_score, "text": "pending"}
+    
+    # Clean up the CV pipeline
+    if session_id in cv_pipelines:
+        del cv_pipelines[session_id]
+        
+    return {"received": True}
+
+@app.get("/api/session/{session_id}/result")
+async def get_session_result(session_id: str):
+    if session_id not in sessions:
+        return {"error": "Session not found"}
+    return sessions[session_id]
+
+@app.websocket("/ws/proctor/{session_id}")
+async def proctor_ws(websocket: WebSocket, session_id: str):
+    await websocket.accept()
+    print(f"[WS] Connection accepted for session: {session_id}")
+    
+    # Retrieve or create CV pipeline for this connection
+    if session_id not in cv_pipelines:
+        cv_pipelines[session_id] = CVPipeline()
+    cv_pipeline = cv_pipelines[session_id]
+    
+    # Initialize session database entry if not exists
+    if session_id not in sessions:
+        sessions[session_id] = {
+            "sessionId": session_id,
+            "candidateId": "unknown",
+            "testId": "unknown",
+            "startTime": datetime.datetime.utcnow().isoformat() + "Z",
+            "endTime": None,
+            "status": "setup",
+            "answers": [],
+            "webcamSnapshotLog": [],
+            "shortcutAttemptLog": [],
+            "warningLog": [],
+            "logOnlyEvents": [],
+            "multiMonitorSuspected": False,
+            "bluetoothDeviceDetected": False,
+            "detectedBluetoothDevices": [],
+            "disqualified": False,
+            "score": {"mcq": 0, "text": "pending"}
+        }
     
     try:
-        # Send ready
-        await websocket.send(json.dumps({
+        # Send system ready event
+        await websocket.send_json({
             "type": "SYSTEM",
             "event": "READY",
-            "message": "Python sidecar connected and ready."
-        }))
-
-        # Start threads if not already running
-        if not cv_thread or not cv_thread.is_alive():
-            cv_stop_event.clear()
-            cv_thread = threading.Thread(target=cv_main_loop, args=(broadcast_event, cv_stop_event))
-            cv_thread.start()
-            
-        if not audio_thread or not audio_thread.is_alive():
-            audio_stop_event.clear()
-            audio_thread = threading.Thread(target=audio_main_loop, args=(broadcast_event, audio_stop_event))
-            audio_thread.start()
-
-        # Keep connection open and wait for messages (though we don't expect many from renderer)
-        async for message in websocket:
-            print(f"Received from renderer: {message}")
-            
-    except websockets.exceptions.ConnectionClosed:
-        pass
-    finally:
-        clients.remove(websocket)
-        print(f"Client disconnected. Total clients: {len(clients)}")
-        if len(clients) == 0:
-            print("No clients connected. Stopping CV and Audio threads.")
-            cv_stop_event.set()
-            audio_stop_event.set()
-
-def broadcast_event(event_dict):
-    """Called by background threads to send events to all connected clients"""
-    if not clients:
-        return
+            "message": "FastAPI proctor service ready."
+        })
+        print(f"[WS] Sent READY event to session: {session_id}")
         
-    message = json.dumps(event_dict)
-    
-    async def _send():
-        tasks = [asyncio.create_task(client.send(message)) for client in clients.copy()]
-        if tasks:
-            await asyncio.wait(tasks)
-            
-    # Schedule the coroutine in the main asyncio loop
-    try:
-        if main_loop and main_loop.is_running():
-             asyncio.run_coroutine_threadsafe(_send(), main_loop)
+        async for message in websocket.iter_json():
+            if message.get("type") == "FRAME":
+                try:
+                    data_str = message.get("data")
+                    if not data_str:
+                        print("[WS] Received FRAME message with no data field")
+                        continue
+                        
+                    # Decode base64 frame
+                    frame_bytes = base64.b64decode(data_str)
+                    np_arr = np.frombuffer(frame_bytes, np.uint8)
+                    frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+                    
+                    if frame is None:
+                        print("[WS] Failed to decode image frame")
+                        await websocket.send_json({
+                            "type": "SYSTEM",
+                            "event": "CAMERA_ERROR",
+                            "message": "Failed to decode frame"
+                        })
+                        continue
+                        
+                    # Process frame in pipeline
+                    events = cv_pipeline.process_frame(frame)
+                    if events:
+                        print(f"[WS] CV events generated: {events}")
+                    for event in events:
+                        await websocket.send_json(event)
+                        
+                except Exception as e:
+                    print(f"[WS] Error processing frame: {e}")
+                    await websocket.send_json({
+                        "type": "SYSTEM",
+                        "event": "CAMERA_ERROR",
+                        "message": f"Processing error: {str(e)}"
+                    })
+                    
+    except WebSocketDisconnect:
+        print(f"[WS] WebSocket disconnected cleanly for session {session_id}")
     except Exception as e:
-        print(f"Failed to broadcast: {e}")
+        print(f"[WS] Unexpected error in websocket loop: {e}")
 
-
-async def main():
-    global main_loop
-    main_loop = asyncio.get_running_loop()
-    
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--port', type=int, default=8765)
-    args = parser.parse_args()
-
-    print(f"Starting WebSocket server on ws://localhost:{args.port}")
-    server = await websockets.serve(handle_client, "localhost", args.port)
-    await asyncio.Future()  # Run forever
-
-if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print("Shutting down sidecar.")
-        cv_stop_event.set()
-        audio_stop_event.set()

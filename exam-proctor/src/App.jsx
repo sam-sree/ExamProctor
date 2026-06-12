@@ -2,11 +2,14 @@ import React, { useState } from 'react';
 import Landing from './screens/Landing';
 import MicSetup from './screens/MicSetup';
 import CameraSetup from './screens/CameraSetup';
+import ScreenShareSetup from './screens/ScreenShareSetup';
 import Briefing from './screens/Briefing';
 import Exam from './screens/Exam';
 import Disqualified from './screens/Disqualified';
 import Results from './screens/Results';
 import WarningToast from './components/WarningToast';
+import FullscreenBlocker from './components/FullscreenBlocker';
+import { useExamStore } from './store/examStore';
 
 export const QUESTIONS = [
   // MCQ - 60 seconds each
@@ -26,13 +29,35 @@ export const QUESTIONS = [
 function App() {
   const [screen, setScreen] = useState('landing');
 
+  const handleBeginSetup = async () => {
+    try {
+      const { candidateId, testId } = useExamStore.getState();
+      const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+      const res = await fetch(`${apiBase}/api/session/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ candidateId, testId })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        useExamStore.setState({ sessionId: data.sessionId });
+        console.log(`Created backend proctoring session with ID: ${data.sessionId}`);
+      }
+    } catch (err) {
+      console.warn("Could not register session with backend server (may be offline):", err);
+    }
+    setScreen('mic');
+  };
+
   return (
     <>
+      <FullscreenBlocker />
       <WarningToast />
       
-      {screen === 'landing' && <Landing onNext={() => setScreen('mic')} />}
+      {screen === 'landing' && <Landing onNext={handleBeginSetup} />}
       {screen === 'mic' && <MicSetup onNext={() => setScreen('camera')} />}
-      {screen === 'camera' && <CameraSetup onNext={() => setScreen('briefing')} />}
+      {screen === 'camera' && <CameraSetup onNext={() => setScreen('screenshare')} />}
+      {screen === 'screenshare' && <ScreenShareSetup onNext={() => setScreen('briefing')} />}
       {screen === 'briefing' && <Briefing onEnterExam={() => setScreen('exam')} />}
       {screen === 'exam' && <Exam onDisqualified={() => setScreen('disqualified')} onFinished={() => setScreen('results')} />}
       {screen === 'disqualified' && <Disqualified onExit={() => setScreen('results')} />}

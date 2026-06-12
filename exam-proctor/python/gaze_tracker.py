@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+import math
 
 def estimate_gaze_ratio(iris_center, eye_left_corner, eye_right_corner):
     eye_width = abs(eye_right_corner.x - eye_left_corner.x)
@@ -17,37 +18,43 @@ def rotationMatrixToEulerAngles(R):
     sy = np.sqrt(R[0,0] * R[0,0] +  R[1,0] * R[1,0])
     singular = sy < 1e-6
     if not singular:
-        x = np.math.atan2(R[2,1] , R[2,2])
-        y = np.math.atan2(-R[2,0], sy)
-        z = np.math.atan2(R[1,0], R[0,0])
+        x = math.atan2(R[2,1] , R[2,2])
+        y = math.atan2(-R[2,0], sy)
+        z = math.atan2(R[1,0], R[0,0])
     else:
-        x = np.math.atan2(-R[1,2], R[1,1])
-        y = np.math.atan2(-R[2,0], sy)
+        x = math.atan2(-R[1,2], R[1,1])
+        y = math.atan2(-R[2,0], sy)
         z = 0
     return np.array([x, y, z])
 
 def check_gaze_and_pose(face_landmarks, image_width, image_height):
-    # Landmarks based on MediaPipe 468 point mesh
-    left_iris_center = face_landmarks.landmark[468]
-    right_iris_center = face_landmarks.landmark[473]
-    left_eye_inner = face_landmarks.landmark[33]
-    left_eye_outer = face_landmarks.landmark[133]
-    right_eye_inner = face_landmarks.landmark[362]
-    right_eye_outer = face_landmarks.landmark[263]
-    
-    left_eye_top = face_landmarks.landmark[159]
-    left_eye_bottom = face_landmarks.landmark[145]
-    right_eye_top = face_landmarks.landmark[386]
-    right_eye_bottom = face_landmarks.landmark[374]
-    
-    # Calculate ratios
-    left_h_ratio = estimate_gaze_ratio(left_iris_center, left_eye_outer, left_eye_inner)
-    right_h_ratio = estimate_gaze_ratio(right_iris_center, right_eye_inner, right_eye_outer)
-    h_ratio = (left_h_ratio + right_h_ratio) / 2.0
-    
-    left_v_ratio = estimate_vertical_gaze(left_iris_center, left_eye_top, left_eye_bottom)
-    right_v_ratio = estimate_vertical_gaze(right_iris_center, right_eye_top, right_eye_bottom)
-    v_ratio = (left_v_ratio + right_v_ratio) / 2.0
+    # Check if we have refined landmarks (length >= 478)
+    if len(face_landmarks.landmark) < 478:
+        # Fallback to nominal gaze if iris landmarks are missing
+        h_ratio = 0.5
+        v_ratio = 0.5
+    else:
+        # Landmarks based on MediaPipe 468 point mesh + 10 iris points
+        left_iris_center = face_landmarks.landmark[468]
+        right_iris_center = face_landmarks.landmark[473]
+        left_eye_inner = face_landmarks.landmark[33]
+        left_eye_outer = face_landmarks.landmark[133]
+        right_eye_inner = face_landmarks.landmark[362]
+        right_eye_outer = face_landmarks.landmark[263]
+        
+        left_eye_top = face_landmarks.landmark[159]
+        left_eye_bottom = face_landmarks.landmark[145]
+        right_eye_top = face_landmarks.landmark[386]
+        right_eye_bottom = face_landmarks.landmark[374]
+        
+        # Calculate ratios
+        left_h_ratio = estimate_gaze_ratio(left_iris_center, left_eye_outer, left_eye_inner)
+        right_h_ratio = estimate_gaze_ratio(right_iris_center, right_eye_inner, right_eye_outer)
+        h_ratio = (left_h_ratio + right_h_ratio) / 2.0
+        
+        left_v_ratio = estimate_vertical_gaze(left_iris_center, left_eye_top, left_eye_bottom)
+        right_v_ratio = estimate_vertical_gaze(right_iris_center, right_eye_top, right_eye_bottom)
+        v_ratio = (left_v_ratio + right_v_ratio) / 2.0
 
     # Pose estimation
     model_points = np.array([

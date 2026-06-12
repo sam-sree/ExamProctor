@@ -1,14 +1,23 @@
 import { useState, useEffect, useRef } from 'react';
 
-export function useExamTimer(initialSeconds) {
+export function useExamTimer(initialSeconds, isPaused) {
   const [timeLeft, setTimeLeft] = useState(initialSeconds);
   const timerRef = useRef(null);
 
+  // When initialSeconds changes (e.g. new question), reset timeLeft
   useEffect(() => {
     setTimeLeft(initialSeconds);
-    
-    if (timerRef.current) clearInterval(timerRef.current);
-    
+  }, [initialSeconds]);
+
+  useEffect(() => {
+    if (isPaused) {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+      return;
+    }
+
     timerRef.current = setInterval(() => {
       setTimeLeft(prev => {
         if (prev <= 1) {
@@ -19,8 +28,12 @@ export function useExamTimer(initialSeconds) {
       });
     }, 1000);
 
-    return () => clearInterval(timerRef.current);
-  }, [initialSeconds]);
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+    };
+  }, [isPaused, initialSeconds]); // depends on isPaused and initialSeconds
 
   const formatted = `${Math.floor(timeLeft / 60).toString().padStart(2, '0')}:${(timeLeft % 60).toString().padStart(2, '0')}`;
   const isWarning = timeLeft <= 15 && timeLeft > 5;

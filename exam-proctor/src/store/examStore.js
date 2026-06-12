@@ -8,7 +8,7 @@ export const useExamStore = create((set, get) => ({
   endTime: null,
   status: 'setup', // setup, active, submitted, disqualified
   answers: [],
-  screenshotLog: [],
+  webcamSnapshotLog: [],
   
   startExam: () => set({ 
     status: 'active', 
@@ -47,7 +47,7 @@ export const useExamStore = create((set, get) => ({
     return { answers: newAnswers };
   }),
 
-  addScreenshot: (screenshot) => set((state) => ({
-    screenshotLog: [...state.screenshotLog, screenshot]
+  addWebcamSnapshot: (snapshot) => set((state) => ({
+    webcamSnapshotLog: [...state.webcamSnapshotLog, snapshot]
   }))
 }));

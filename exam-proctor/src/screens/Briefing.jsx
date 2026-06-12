@@ -1,41 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Eye, Mic, User, Lock, Monitor, Bluetooth, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { Eye, Mic, User, Lock, Monitor, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { useProctoringStore } from '../store/proctoringStore';
 
 export default function Briefing({ onEnterExam }) {
   const [agreed, setAgreed] = useState(false);
-  const [btStatus, setBtStatus] = useState('pending'); // pending, success, failed
+  const [fullscreenError, setFullscreenError] = useState('');
   const resetProctoring = useProctoringStore(state => state.resetProctoring);
 
-  const checkBluetooth = async () => {
-    setBtStatus('pending');
-    if (window.electronAPI) {
-      const res = await window.electronAPI.disableBluetooth();
-      if (res.success) {
-        setBtStatus('success');
-      } else {
-        // Fallback: Check if we have active web bluetooth devices (just mock logic here if real check fails)
-        try {
-            const devices = await navigator.bluetooth.getDevices();
-            if (devices && devices.length > 0) {
-               setBtStatus('failed');
-            } else {
-               // OS command failed but no devices connected via Web API, we can proceed
-               setBtStatus('success'); 
-            }
-        } catch(e) {
-            // Web Bluetooth not supported or failed, assume success for demo but log warning
-            console.warn("Web Bluetooth check failed", e);
-            setBtStatus('success');
-        }
-      }
-    } else {
-      setBtStatus('success'); // Web mode
-    }
-  };
-
   useEffect(() => {
-    checkBluetooth();
     resetProctoring();
   }, [resetProctoring]);
 
@@ -44,16 +16,27 @@ export default function Briefing({ onEnterExam }) {
     { icon: Mic, text: "Stay in a quiet space. Background voices will be flagged." },
     { icon: User, text: "Only you should be present in your room." },
     { icon: Lock, text: "This window cannot be minimized or closed until you submit." },
-    { icon: Monitor, text: "Your screen is captured periodically throughout the exam." },
-    { icon: Bluetooth, text: "Bluetooth has been disabled for the duration of this exam." },
+    { icon: Monitor, text: "If you are using multiple monitors, disconnect all secondary displays before beginning. The system cannot fully verify single-monitor compliance; use of additional monitors will be flagged in the administrator report." },
     { icon: AlertTriangle, text: "3 warnings result in automatic disqualification. The exam administrator will be notified." }
   ];
 
   const handleStart = async () => {
-    if (window.electronAPI) {
-      await window.electronAPI.startKiosk();
+    try {
+      const elem = document.documentElement;
+      if (elem.requestFullscreen) {
+        await elem.requestFullscreen();
+      } else if (elem.webkitRequestFullscreen) {
+        await elem.webkitRequestFullscreen();
+      } else if (elem.msRequestFullscreen) {
+        await elem.msRequestFullscreen();
+      }
+      
+      setFullscreenError('');
+      onEnterExam();
+    } catch (err) {
+      console.error("Fullscreen request rejected", err);
+      setFullscreenError("Fullscreen is required to begin this exam. Please allow fullscreen access and try again.");
     }
-    onEnterExam();
   };
 
   return (
@@ -81,11 +64,30 @@ export default function Briefing({ onEnterExam }) {
         
         <h2 style={{ fontSize: '28px', fontWeight: 700 }}>You're all set. Here's what to expect.</h2>
 
+        {fullscreenError && (
+          <div style={{ 
+            padding: '16px', 
+            background: 'var(--danger-soft)', 
+            color: 'var(--danger)', 
+            borderRadius: '8px', 
+            display: 'flex', 
+            gap: '12px', 
+            alignItems: 'center',
+            textAlign: 'left',
+            fontWeight: 600,
+            fontSize: '14px',
+            lineHeight: 1.4
+          }}>
+            <AlertTriangle size={24} style={{ flexShrink: 0 }} />
+            <span>{fullscreenError}</span>
+          </div>
+        )}
+
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           {rules.map((Rule, idx) => (
             <div key={idx} style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
               <Rule.icon size={24} color="var(--primary)" style={{ flexShrink: 0 }} />
-              <div style={{ fontSize: '15px', fontWeight: 400, color: 'var(--text-primary)', lineHeight: 1.5 }}>
+              <div style={{ fontSize: '15px', fontWeight: 400, color: 'var(--text-primary)', lineHeight: 1.5, textAlign: 'left' }}>
                 {Rule.text}
               </div>
             </div>
@@ -104,19 +106,6 @@ export default function Briefing({ onEnterExam }) {
           <div style={{ fontSize: '13px', fontWeight: 500, marginTop: '8px' }}>You currently have 0 warnings.</div>
         </div>
 
-        {btStatus === 'pending' && <div style={{ color: 'var(--text-secondary)' }}>Checking Bluetooth status...</div>}
-        {btStatus === 'success' && (
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', background: 'var(--success-soft)', color: 'var(--success)', padding: '8px 16px', borderRadius: '8px', fontWeight: 600, fontSize: '14px', alignSelf: 'flex-start' }}>
-            Bluetooth disabled <CheckCircle2 size={16} />
-          </div>
-        )}
-        {btStatus === 'failed' && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', background: 'var(--warn-soft)', color: '#D97706', padding: '12px 16px', borderRadius: '8px', fontWeight: 500, fontSize: '14px' }}>
-            <AlertTriangle size={18} /> Bluetooth device detected - please disconnect all devices
-            <button onClick={checkBluetooth} style={{ marginLeft: 'auto', padding: '6px 12px', background: 'white', border: '1px solid #D97706', borderRadius: '6px', color: '#D97706', fontSize: '12px', fontWeight: 600 }}>Check Again</button>
-          </div>
-        )}
-
         <label style={{ display: 'flex', gap: '12px', alignItems: 'center', cursor: 'pointer', padding: '16px', border: '1px solid var(--border)', borderRadius: '8px' }}>
           <input 
             type="checkbox" 
@@ -129,16 +118,16 @@ export default function Briefing({ onEnterExam }) {
 
         <button 
           onClick={handleStart}
-          disabled={!agreed || btStatus === 'failed'}
+          disabled={!agreed}
           style={{
             width: '100%',
-            background: (agreed && btStatus !== 'failed') ? 'var(--primary)' : 'var(--border)',
-            color: (agreed && btStatus !== 'failed') ? 'white' : 'var(--text-disabled)',
+            background: agreed ? 'var(--primary)' : 'var(--border)',
+            color: agreed ? 'white' : 'var(--text-disabled)',
             fontWeight: 700,
             fontSize: '16px',
             height: '56px',
             borderRadius: 'var(--radius-btn)',
-            cursor: (agreed && btStatus !== 'failed') ? 'pointer' : 'not-allowed',
+            cursor: agreed ? 'pointer' : 'not-allowed',
             transition: 'all 300ms ease'
           }}
         >

@@ -1,38 +1,62 @@
 import { create } from 'zustand';
 
-// Store for managing warnings and CV events
 export const useProctoringStore = create((set, get) => ({
   warningCount: 0,
   warningLog: [],
+  shortcutAttemptLog: [],
+  logOnlyEvents: [],
   disqualified: false,
+  isConnectionLost: false,
+  isFullscreenExited: false,
+  multiMonitorSuspected: false,
+  bluetoothDeviceDetected: false,
+  detectedBluetoothDevices: [],
 
   fireWarning: (type, metadata = {}) => {
-    const { warningCount, warningLog } = get();
-    
-    // Some types are logged only
-    if (type === 'SHORTCUT_ATTEMPT' || type === 'CLOSE_ATTEMPT') {
-        set({ 
-            warningLog: [...warningLog, { type, metadata, timestamp: new Date().toISOString(), count: warningCount }] 
-        });
-        return;
+    // If it's a log-only type, divert to logEvent
+    if (['SHORTCUT_ATTEMPT', 'CLOSE_ATTEMPT', 'DEVTOOLS_SUSPECTED'].includes(type)) {
+      get().logEvent(type, metadata);
+      return;
     }
 
+    const { warningCount, warningLog } = get();
     const newCount = warningCount + 1;
-    const entry = { type, metadata, timestamp: new Date().toISOString(), count: newCount };
+    const entry = { type, timestamp: new Date().toISOString(), count: newCount };
 
     set({ warningCount: newCount, warningLog: [...warningLog, entry] });
 
-    // Show toast
+    // Show toast for UI warning
     window.dispatchEvent(new CustomEvent('proctor-warning', { detail: entry }));
 
     if (newCount >= 3) {
       set({ disqualified: true });
-      // Tell electron to release kiosk early so we can show disqualified screen properly if needed
-      if (window.electronAPI) {
-          window.electronAPI.endKiosk();
-      }
     }
   },
-  
-  resetProctoring: () => set({ warningCount: 0, warningLog: [], disqualified: false })
+
+  logEvent: (type, metadata = {}) => {
+    const timestamp = new Date().toISOString();
+    if (type === 'SHORTCUT_ATTEMPT') {
+      const shortcut = metadata.shortcut || 'Unknown Shortcut';
+      set(state => ({
+        shortcutAttemptLog: [...state.shortcutAttemptLog, { shortcut, timestamp }]
+      }));
+    } else {
+      set(state => ({
+        logOnlyEvents: [...state.logOnlyEvents, { type, timestamp, metadata }]
+      }));
+    }
+  },
+
+  resetProctoring: () => set({
+    warningCount: 0,
+    warningLog: [],
+    shortcutAttemptLog: [],
+    logOnlyEvents: [],
+    disqualified: false,
+    isConnectionLost: false,
+    isFullscreenExited: false,
+    multiMonitorSuspected: false,
+    bluetoothDeviceDetected: false,
+    detectedBluetoothDevices: []
+  })
 }));
