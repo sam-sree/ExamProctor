@@ -32,29 +32,33 @@ class CVPipeline:
 
         if face_res["event"] == "FACE_ABSENT":
             self.multiple_faces_start_time = None
-            self.face_absent_start_time = None
-            if self.last_face_event != "FACE_ABSENT":
-                events.append({
-                    "type": "CV_EVENT",
-                    "event": "FACE_ABSENT",
-                    "confidence": face_res["confidence"],
-                    "metadata": face_res.get("metadata", {}),
-                    "timestamp": timestamp
-                })
-                self.last_face_event = "FACE_ABSENT"
+            if self.face_absent_start_time is None:
+                self.face_absent_start_time = now
+            elif now - self.face_absent_start_time >= 1.5:
+                if self.last_face_event != "FACE_ABSENT":
+                    events.append({
+                        "type": "CV_EVENT",
+                        "event": "FACE_ABSENT",
+                        "confidence": face_res["confidence"],
+                        "metadata": face_res.get("metadata", {}),
+                        "timestamp": timestamp
+                    })
+                    self.last_face_event = "FACE_ABSENT"
 
         elif face_res["event"] == "MULTIPLE_FACES":
             self.face_absent_start_time = None
-            self.multiple_faces_start_time = None
-            if self.last_face_event != "MULTIPLE_FACES":
-                events.append({
-                    "type": "CV_EVENT",
-                    "event": "MULTIPLE_FACES",
-                    "confidence": face_res["confidence"],
-                    "metadata": face_res.get("metadata", {}),
-                    "timestamp": timestamp
-                })
-                self.last_face_event = "MULTIPLE_FACES"
+            if self.multiple_faces_start_time is None:
+                self.multiple_faces_start_time = now
+            elif now - self.multiple_faces_start_time >= 1.5:
+                if self.last_face_event != "MULTIPLE_FACES":
+                    events.append({
+                        "type": "CV_EVENT",
+                        "event": "MULTIPLE_FACES",
+                        "confidence": face_res["confidence"],
+                        "metadata": face_res.get("metadata", {}),
+                        "timestamp": timestamp
+                    })
+                    self.last_face_event = "MULTIPLE_FACES"
 
         else:  # FACE_NOMINAL
             self.face_absent_start_time = None
@@ -84,7 +88,7 @@ class CVPipeline:
             if gaze_res["event"] in ["GAZE_DEVIATION", "HEAD_POSE_VIOLATION"]:
                 if self.gaze_deviation_start_time is None:
                     self.gaze_deviation_start_time = now
-                elif now - self.gaze_deviation_start_time >= 3.0:
+                elif now - self.gaze_deviation_start_time >= 1.5:
                     if self.last_gaze_event != gaze_res["event"]:
                         events.append({
                             "type": "CV_EVENT",

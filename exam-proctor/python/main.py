@@ -35,6 +35,7 @@ class SessionCreate(BaseModel):
     testId: str
 
 class DisqualifyPayload(BaseModel):
+    answers: Optional[List[Dict[str, Any]]] = []
     warningLog: List[Dict[str, Any]]
     webcamSnapshotLog: List[Dict[str, Any]]
     shortcutAttemptLog: List[Dict[str, Any]]
@@ -133,10 +134,9 @@ async def proctor_ws(websocket: WebSocket, session_id: str):
     await websocket.accept()
     print(f"[WS] Connection accepted for session: {session_id}")
     
-    # Retrieve or create CV pipeline for this connection
-    if session_id not in cv_pipelines:
-        cv_pipelines[session_id] = CVPipeline()
-    cv_pipeline = cv_pipelines[session_id]
+    # Always create a fresh CV pipeline for a new WebSocket connection to reset state
+    cv_pipeline = CVPipeline()
+    cv_pipelines[session_id] = cv_pipeline
     
     # Initialize session database entry if not exists
     if session_id not in sessions:
@@ -196,6 +196,12 @@ async def proctor_ws(websocket: WebSocket, session_id: str):
                         print(f"[WS] CV events generated: {events}")
                     for event in events:
                         await websocket.send_json(event)
+                        
+                    # Always acknowledge that the frame has been processed to prevent queue backlog on client
+                    await websocket.send_json({
+                        "type": "FRAME_PROCESSED",
+                        "timestamp": message.get("timestamp")
+                    })
                         
                 except Exception as e:
                     print(f"[WS] Error processing frame: {e}")

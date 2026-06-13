@@ -13,11 +13,15 @@ import { AlertCircle } from 'lucide-react';
 
 export default function Exam({ onDisqualified, onFinished }) {
   const sessionId = useExamStore(state => state.sessionId);
+  const candidateName = useExamStore(state => state.candidateName);
   
-  // 1. Connect to CV WebSocket client (active = true during exam)
-  useCVEvents(true);
-
-  // 2. Start Web Audio monitor
+  const examStatus = useExamStore(state => state.status);
+  const isExamActive = examStatus === 'active';
+  
+  // 1. Connect to CV WebSocket client only while exam is active
+  useCVEvents(isExamActive, isExamActive);
+  
+  // 2. Audio monitor starts/stops with exam activity
   const { startMonitor: startAudioMonitor, stopMonitor: stopAudioMonitor } = useAudioMonitor();
 
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -25,6 +29,7 @@ export default function Exam({ onDisqualified, onFinished }) {
   const [timeSpent, setTimeSpent] = useState(0);
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
   const [isScreenShareEnded, setIsScreenShareEnded] = useState(false);
+  const [screenShareError, setScreenShareError] = useState(null);
 
   const screenShareTimerRef = useRef(null);
 
@@ -40,13 +45,23 @@ export default function Exam({ onDisqualified, onFinished }) {
   // Read pause reasons
   const isConnectionLost = useProctoringStore(state => state.isConnectionLost);
   const isFullscreenExited = useProctoringStore(state => state.isFullscreenExited);
-  const isPaused = isConnectionLost || isFullscreenExited || isScreenShareEnded;
+  const faceViolationActive = useProctoringStore(state => state.faceViolationActive);
+  const faceViolationType = useProctoringStore(state => state.faceViolationType);
+  const isPaused = isConnectionLost || isFullscreenExited || isScreenShareEnded || faceViolationActive;
 
+  // Start the exam when component mounts
   useEffect(() => {
     startExam();
-    startAudioMonitor();
-    return () => stopAudioMonitor();
   }, [startExam]);
+
+  // Manage audio monitor based on exam activity
+  useEffect(() => {
+    if (isExamActive) {
+      startAudioMonitor();
+    } else {
+      stopAudioMonitor();
+    }
+  }, [isExamActive]);
 
   // Load existing answers on slide change
   useEffect(() => {
@@ -54,6 +69,13 @@ export default function Exam({ onDisqualified, onFinished }) {
     setCurrentAnswer(existing ? existing.answer : (question.type === 'text' ? '' : null));
     setTimeSpent(0);
   }, [currentIndex, question.id, answers]);
+
+  // Stop audio monitor when exam is no longer active (submitted/disqualified)
+  useEffect(() => {
+    if (!isExamActive) {
+      stopAudioMonitor();
+    }
+  }, [isExamActive]);
 
   // Handle Question Timer spent seconds (increment only when not paused)
   useEffect(() => {
@@ -71,6 +93,7 @@ export default function Exam({ onDisqualified, onFinished }) {
       const sendDisqualify = async () => {
         try {
           const payload = {
+            answers: useExamStore.getState().answers,
             warningLog: useProctoringStore.getState().warningLog,
             webcamSnapshotLog: useExamStore.getState().webcamSnapshotLog,
             shortcutAttemptLog: useProctoringStore.getState().shortcutAttemptLog,
@@ -110,6 +133,7 @@ export default function Exam({ onDisqualified, onFinished }) {
     const handleScreenShareEnded = () => {
       useProctoringStore.getState().fireWarning('SCREENSHARE_ENDED');
       setIsScreenShareEnded(true);
+      useProctoringStore.setState({ isScreenShareEnded: true });
 
       // Start 15s automatic submission countdown
       screenShareTimerRef.current = setTimeout(() => {
@@ -138,7 +162,14 @@ export default function Exam({ onDisqualified, onFinished }) {
     const handleBlur = () => {
       blurTimer = setTimeout(() => {
         if (document.hidden) return; // already counted by tab switch
-        useProctoringStore.getState().fireWarning('WINDOW_BLUR');
+        
+        // Don't trigger blur warning if already in a paused/blocked state (e.g. fullscreen exited, face absent)
+        const state = useProctoringStore.getState();
+        if (state.isFullscreenExited || state.isConnectionLost || state.faceViolationActive) {
+          return;
+        }
+        
+        state.fireWarning('WINDOW_BLUR');
       }, 2000);
     };
     const handleFocus = () => {
@@ -257,14 +288,58 @@ export default function Exam({ onDisqualified, onFinished }) {
     };
   }, []);
 
+  // Continuous Bluetooth device monitoring during active exam
+  useEffect(() => {
+    if (!isExamActive) return;
+
+    const checkBluetoothDevices = async () => {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const bluetoothKeywords = ["airpods", "bluetooth", "wireless", "headset", "buds"];
+        const flagged = devices.filter(d => 
+          d.label && bluetoothKeywords.some(keyword => d.label.toLowerCase().includes(keyword))
+        );
+        
+        if (flagged.length > 0) {
+          const currentStore = useProctoringStore.getState();
+          // If we haven't already marked it detected in the store, log the warning
+          if (!currentStore.bluetoothDeviceDetected) {
+            currentStore.fireWarning('BLUETOOTH_CONNECTED', { devices: flagged.map(f => f.label) });
+            useProctoringStore.setState({ 
+              bluetoothDeviceDetected: true,
+              detectedBluetoothDevices: flagged.map(f => f.label)
+            });
+          }
+        }
+      } catch (err) {
+        console.error("Bluetooth check failed", err);
+      }
+    };
+
+    const interval = setInterval(checkBluetoothDevices, 4000);
+    return () => clearInterval(interval);
+  }, [isExamActive]);
+
   const resumeScreenShare = async () => {
     try {
+      setScreenShareError(null);
       const mediaStream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
+        video: { displaySurface: "monitor" },
         audio: false
       });
+      
+      const videoTrack = mediaStream.getVideoTracks()[0];
+      const settings = videoTrack ? videoTrack.getSettings() : {};
+      
+      if (settings.displaySurface && settings.displaySurface !== 'monitor') {
+        mediaStream.getTracks().forEach(t => t.stop());
+        setScreenShareError("You must share your entire screen. Sharing a single window or tab is not allowed.");
+        return;
+      }
+
       window.screenShareStream = mediaStream;
       setIsScreenShareEnded(false);
+      useProctoringStore.setState({ isScreenShareEnded: false });
       
       if (screenShareTimerRef.current) {
         clearTimeout(screenShareTimerRef.current);
@@ -272,11 +347,11 @@ export default function Exam({ onDisqualified, onFinished }) {
       }
 
       // Add listener to new track
-      const videoTrack = mediaStream.getVideoTracks()[0];
       if (videoTrack) {
         videoTrack.addEventListener('ended', () => {
           useProctoringStore.getState().fireWarning('SCREENSHARE_ENDED');
           setIsScreenShareEnded(true);
+          useProctoringStore.setState({ isScreenShareEnded: true });
           screenShareTimerRef.current = setTimeout(() => {
             handleSubmit();
           }, 15000);
@@ -284,6 +359,7 @@ export default function Exam({ onDisqualified, onFinished }) {
       }
     } catch (err) {
       console.error("Failed to resume screenshare", err);
+      setScreenShareError("Screen sharing permission denied or cancelled.");
     }
   };
 
@@ -361,6 +437,46 @@ export default function Exam({ onDisqualified, onFinished }) {
       {/* Global blockers */}
       <FullscreenBlocker />
       
+      {faceViolationActive && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(240, 244, 255, 0.85)',
+          backdropFilter: 'blur(16px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9998,
+          transition: 'all 0.3s ease'
+        }}>
+          <div style={{
+            background: 'var(--surface)',
+            padding: '48px',
+            borderRadius: 'var(--radius-card)',
+            boxShadow: 'var(--shadow-card)',
+            textAlign: 'center',
+            maxWidth: '500px',
+            border: '2px solid var(--warn)'
+          }} className="animate-slide-up">
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '20px' }}>
+              <AlertCircle size={48} color="var(--warn)" />
+            </div>
+            <h3 style={{ fontSize: '24px', fontWeight: 700, marginBottom: '16px', color: 'var(--text-primary)' }}>
+              Test Paused - Face Issue Detected
+            </h3>
+            <p style={{ color: 'var(--text-secondary)', marginBottom: '24px', lineHeight: 1.6, fontSize: '15px' }}>
+              {faceViolationType === 'FACE_ABSENT' 
+                ? "Your face is not detected in the camera frame. Please position yourself clearly in front of the camera to resume."
+                : "Multiple faces detected in the camera frame. Please ensure you are alone in front of the camera to resume."
+              }
+            </p>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '10px 16px', background: 'var(--warn-soft)', color: 'var(--warn)', borderRadius: '8px', fontWeight: 600, fontSize: '14px' }}>
+              Warnings logged: {warningCount} of 3
+            </div>
+          </div>
+        </div>
+      )}
+      
       {isConnectionLost && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(240, 244, 255, 0.97)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, backdropFilter: 'blur(8px)' }}>
           <div style={{ background: 'var(--surface)', padding: '48px', borderRadius: 'var(--radius-card)', boxShadow: 'var(--shadow-card)', textAlign: 'center', maxWidth: '450px' }} className="animate-slide-up">
@@ -375,7 +491,14 @@ export default function Exam({ onDisqualified, onFinished }) {
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(240, 244, 255, 0.97)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, backdropFilter: 'blur(8px)' }}>
           <div style={{ background: 'var(--surface)', padding: '48px', borderRadius: 'var(--radius-card)', boxShadow: 'var(--shadow-card)', textAlign: 'center', maxWidth: '450px' }} className="animate-slide-up">
             <h3 style={{ fontSize: '22px', fontWeight: 700, marginBottom: '16px', color: 'var(--danger)' }}>Screen Share Stopped</h3>
-            <p style={{ color: 'var(--text-secondary)', marginBottom: '24px', lineHeight: 1.5 }}>Screen share has stopped. Resume sharing to continue your exam. Unresolved screenshares will submit the test in 15 seconds.</p>
+            <p style={{ color: 'var(--text-secondary)', marginBottom: '24px', lineHeight: 1.5 }}>
+              Screen share has stopped. Resume sharing to continue your exam. Unresolved screenshares will submit the test in 15 seconds.
+            </p>
+            {screenShareError && (
+              <p style={{ color: 'var(--danger)', fontSize: '13px', fontWeight: 600, marginBottom: '20px', padding: '10px', background: 'var(--danger-soft)', borderRadius: '6px' }}>
+                {screenShareError}
+              </p>
+            )}
             <button onClick={resumeScreenShare} style={{ padding: '14px 28px', background: 'var(--primary)', color: 'white', borderRadius: 'var(--radius-btn)', fontWeight: 700 }}>
               Resume Sharing
             </button>
@@ -400,14 +523,14 @@ export default function Exam({ onDisqualified, onFinished }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <span style={{ fontWeight: 700, fontSize: '14px' }}>Software Engineering Principles</span>
           <span style={{ color: 'var(--text-disabled)' }}>·</span>
-          <span style={{ fontWeight: 300, fontSize: '12px', color: 'var(--text-secondary)' }}>Alex Chen</span>
+          <span style={{ fontWeight: 300, fontSize: '12px', color: 'var(--text-secondary)' }}>{candidateName}</span>
         </div>
 
         <div style={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)' }}>
            <TimerBar initialSeconds={question.timeLimit} onTimeUp={handleTimeUp} isPaused={isPaused} key={currentIndex} />
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <span style={{ color: 'var(--text-secondary)', fontSize: '12px', fontWeight: 500 }}>Q {currentIndex + 1} of {QUESTIONS.length}</span>
             <WarningDots count={warningCount} />
@@ -418,6 +541,34 @@ export default function Exam({ onDisqualified, onFinished }) {
           >
             Submit Test
           </button>
+
+          {/* Profile Avatar */}
+          <div className="profile-avatar-wrap" style={{ position: 'relative' }}>
+            <div
+              id="profile-avatar"
+              style={{
+                width: '36px',
+                height: '36px',
+                borderRadius: '50%',
+                background: 'linear-gradient(135deg, var(--primary) 0%, #a78bfa 100%)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: 'white',
+                fontWeight: 700,
+                fontSize: '13px',
+                letterSpacing: '0.04em',
+                cursor: 'pointer',
+                flexShrink: 0,
+                boxShadow: '0 2px 8px rgba(108,127,216,0.35)',
+                border: '2px solid rgba(255,255,255,0.6)',
+                transition: 'transform 0.18s ease, box-shadow 0.18s ease',
+                userSelect: 'none'
+              }}
+            >
+              {candidateName.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
+            </div>
+          </div>
         </div>
       </div>
 

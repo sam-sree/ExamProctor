@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Eye, Mic, User, Lock, Monitor, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { useProctoringStore } from '../store/proctoringStore';
 
-export default function Briefing({ onEnterExam }) {
+export default function Briefing({ onEnterExam, onBackToScreenShare }) {
   const [agreed, setAgreed] = useState(false);
   const [fullscreenError, setFullscreenError] = useState('');
   const resetProctoring = useProctoringStore(state => state.resetProctoring);
@@ -21,6 +21,14 @@ export default function Briefing({ onEnterExam }) {
   ];
 
   const handleStart = async () => {
+    const screenStream = window.screenShareStream;
+    const isSharing = screenStream && screenStream.getVideoTracks().some(track => track.readyState === 'live');
+    
+    if (!isSharing) {
+      setFullscreenError("Your screen share has disconnected. Please go back and set it up again.");
+      return;
+    }
+
     try {
       const elem = document.documentElement;
       if (elem.requestFullscreen) {
@@ -64,25 +72,6 @@ export default function Briefing({ onEnterExam }) {
         
         <h2 style={{ fontSize: '28px', fontWeight: 700 }}>You're all set. Here's what to expect.</h2>
 
-        {fullscreenError && (
-          <div style={{ 
-            padding: '16px', 
-            background: 'var(--danger-soft)', 
-            color: 'var(--danger)', 
-            borderRadius: '8px', 
-            display: 'flex', 
-            gap: '12px', 
-            alignItems: 'center',
-            textAlign: 'left',
-            fontWeight: 600,
-            fontSize: '14px',
-            lineHeight: 1.4
-          }}>
-            <AlertTriangle size={24} style={{ flexShrink: 0 }} />
-            <span>{fullscreenError}</span>
-          </div>
-        )}
-
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           {rules.map((Rule, idx) => (
             <div key={idx} style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
@@ -115,6 +104,46 @@ export default function Briefing({ onEnterExam }) {
           />
           <span style={{ fontSize: '14px', fontWeight: 500 }}>I understand the above and confirm I am ready to begin.</span>
         </label>
+
+        {fullscreenError && (
+          <div style={{ 
+            padding: '16px', 
+            background: 'var(--danger-soft)', 
+            color: 'var(--danger)', 
+            borderRadius: '8px', 
+            display: 'flex', 
+            flexDirection: 'column',
+            gap: '12px', 
+            alignItems: 'flex-start',
+            textAlign: 'left',
+            fontWeight: 600,
+            fontSize: '14px',
+            lineHeight: 1.4
+          }}>
+            <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+              <AlertTriangle size={24} style={{ flexShrink: 0 }} />
+              <span>{fullscreenError}</span>
+            </div>
+            {fullscreenError.includes("screen share") && (
+              <button 
+                onClick={onBackToScreenShare}
+                style={{
+                  marginTop: '4px',
+                  padding: '8px 16px',
+                  background: 'var(--danger)',
+                  color: 'white',
+                  borderRadius: '6px',
+                  fontWeight: 600,
+                  fontSize: '13px',
+                  border: 'none',
+                  cursor: 'pointer'
+                }}
+              >
+                Go back to Screen Share Setup
+              </button>
+            )}
+          </div>
+        )}
 
         <button 
           onClick={handleStart}

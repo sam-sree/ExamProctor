@@ -8,7 +8,6 @@ import Exam from './screens/Exam';
 import Disqualified from './screens/Disqualified';
 import Results from './screens/Results';
 import WarningToast from './components/WarningToast';
-import FullscreenBlocker from './components/FullscreenBlocker';
 import { useExamStore } from './store/examStore';
 
 export const QUESTIONS = [
@@ -51,14 +50,13 @@ function App() {
 
   return (
     <>
-      <FullscreenBlocker />
       <WarningToast />
       
       {screen === 'landing' && <Landing onNext={handleBeginSetup} />}
       {screen === 'mic' && <MicSetup onNext={() => setScreen('camera')} />}
       {screen === 'camera' && <CameraSetup onNext={() => setScreen('screenshare')} />}
       {screen === 'screenshare' && <ScreenShareSetup onNext={() => setScreen('briefing')} />}
-      {screen === 'briefing' && <Briefing onEnterExam={() => setScreen('exam')} />}
+      {screen === 'briefing' && <Briefing onEnterExam={() => setScreen('exam')} onBackToScreenShare={() => setScreen('screenshare')} />}
       {screen === 'exam' && <Exam onDisqualified={() => setScreen('disqualified')} onFinished={() => setScreen('results')} />}
       {screen === 'disqualified' && <Disqualified onExit={() => setScreen('results')} />}
       {screen === 'results' && <Results />}

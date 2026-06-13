@@ -11,6 +11,7 @@ export default function Results() {
   const localSessionId = useExamStore(state => state.sessionId);
   const localAnswers = useExamStore(state => state.answers);
   const localStatus = useExamStore(state => state.status);
+  const candidateName = useExamStore(state => state.candidateName);
   const localWarningLog = useProctoringStore(state => state.warningLog);
   const localWarningCount = useProctoringStore(state => state.warningCount);
 
@@ -120,7 +121,7 @@ export default function Results() {
             {status === 'disqualified' ? 'Session Disqualified' : 'Exam Complete'}
           </h1>
           <div style={{ color: 'var(--text-secondary)', fontSize: '15px' }}>
-            Alex Chen · Software Engineering Principles · {new Date().toLocaleDateString()}
+            {candidateName} · Software Engineering Principles · {new Date().toLocaleDateString()}
           </div>
         </div>
 

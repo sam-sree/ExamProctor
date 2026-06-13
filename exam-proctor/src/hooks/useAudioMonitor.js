@@ -22,6 +22,8 @@ export function useAudioMonitor() {
   const calibrationStartRef = useRef(null);
   const speechStartTimeRef = useRef(null);
   const lastStateWasNominalRef = useRef(true);
+  const ambientBaselineDbRef = useRef(0);
+  const lastSpeechTimeRef = useRef(0);
 
   // We read examActive from examStore to ensure we only trigger strikes during the exam
   const examStatus = useExamStore(state => state.status);
@@ -68,17 +70,24 @@ export function useAudioMonitor() {
       const updateLoop = () => {
         if (!analyserRef.current) return;
         
-        // A. Visual volume level (using frequency data for visual response)
+        // A. Visual volume level (using frequency data for speech range visual response)
         analyserRef.current.getByteFrequencyData(freqDataArray);
         let freqSum = 0;
-        for (let i = 0; i < bufferLength; i++) {
-          freqSum += freqDataArray[i];
+        let voiceBinsCount = 0;
+        // Focus only on human voice frequency band (approx. 85Hz to 3400Hz)
+        // to avoid diluting the average with lowpass-filtered (zeroed-out) bins.
+        for (let i = 2; i <= 80; i++) {
+          if (i < bufferLength) {
+            freqSum += freqDataArray[i];
+            voiceBinsCount++;
+          }
         }
-        const avgFreq = freqSum / bufferLength;
-        const visualPercentage = Math.min(100, Math.max(0, (avgFreq / 255) * 100 * 2.5));
+        const avgFreq = voiceBinsCount > 0 ? (freqSum / voiceBinsCount) : 0;
+        const visualPercentage = Math.min(100, Math.max(0, (avgFreq / 255) * 100 * 1.5));
         setLevel(visualPercentage);
         
-        if (visualPercentage > 30) {
+        // Register confirmation spike only after calibration is done
+        if (visualPercentage > 25 && !calibrationStartRef.current) {
           setHasSpiked(true);
         }
 
@@ -101,16 +110,18 @@ export function useAudioMonitor() {
           const values = calibrationValuesRef.current;
           const baseline = values.reduce((sum, v) => sum + v, 0) / (values.length || 1);
           setAmbientBaselineDb(baseline);
+          ambientBaselineDbRef.current = baseline;
           setIsCalibrated(true);
           setIsCalibrating(false);
           calibrationStartRef.current = null;
           console.log(`Audio baseline calibrated at: ${baseline.toFixed(2)} dB`);
         } else {
           // Normal analysis phase
-          const aboveBaseline = db - ambientBaselineDb;
+          const aboveBaseline = db - ambientBaselineDbRef.current;
           const isSpeechLevel = aboveBaseline > 18.0;
 
           if (isSpeechLevel) {
+            lastSpeechTimeRef.current = nowMs;
             if (speechStartTimeRef.current === null) {
               speechStartTimeRef.current = nowMs;
             } else if (nowMs - speechStartTimeRef.current >= 1500) {
@@ -124,9 +135,12 @@ export function useAudioMonitor() {
               }
             }
           } else {
-            speechStartTimeRef.current = null;
-            if (!lastStateWasNominalRef.current) {
-              lastStateWasNominalRef.current = true;
+            // Grace period: allow 500ms of quiet before resetting the speech timer
+            if (nowMs - lastSpeechTimeRef.current > 500) {
+              speechStartTimeRef.current = null;
+              if (!lastStateWasNominalRef.current) {
+                lastStateWasNominalRef.current = true;
+              }
             }
           }
         }

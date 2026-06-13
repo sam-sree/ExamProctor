@@ -33,7 +33,9 @@ export default function WarningToast() {
     'HEAD_POSE_VIOLATION': 'Please keep your head facing forward.',
     'BACKGROUND_AUDIO': 'Background speech or noise detected.',
     'WINDOW_BLUR': 'You must remain focused on the exam window.',
-    'PASTE_DETECTED': 'Pasting content is prohibited.'
+    'PASTE_DETECTED': 'Pasting content is prohibited.',
+    'FULLSCREEN_EXIT': 'Fullscreen mode was exited.',
+    'FULLSCREEN_EXIT_TIMEOUT': 'Stayed out of fullscreen mode for more than 5 seconds.'
   };
 
   return (

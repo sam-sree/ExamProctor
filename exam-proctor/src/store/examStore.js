@@ -3,6 +3,7 @@ import { create } from 'zustand';
 export const useExamStore = create((set, get) => ({
   sessionId: crypto.randomUUID(),
   candidateId: 'test-user-123',
+  candidateName: 'ABC XYZ',
   testId: 'exam-101',
   startTime: null,
   endTime: null,

@@ -22,7 +22,9 @@ export default function Disqualified({ onExit }) {
     'HEAD_POSE_VIOLATION': 'Head position violated boundaries for more than 3 seconds',
     'BACKGROUND_AUDIO': 'Speech or noise detected above threshold',
     'WINDOW_BLUR': 'Window focus was lost',
-    'PASTE_DETECTED': 'Pasting text into answer field'
+    'PASTE_DETECTED': 'Pasting text into answer field',
+    'FULLSCREEN_EXIT': 'Exited fullscreen mode',
+    'FULLSCREEN_EXIT_TIMEOUT': 'Remained out of fullscreen mode for more than 5 seconds'
   };
 
   const handleExit = async () => {

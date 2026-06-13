@@ -4,7 +4,7 @@ import VolumeHeatBar from '../components/VolumeHeatBar';
 import { CheckCircle2, AlertCircle } from 'lucide-react';
 
 export default function MicSetup({ onNext }) {
-  const { level, isActive, hasSpiked, error, startMonitor } = useAudioMonitor();
+  const { level, isActive, isCalibrating, hasSpiked, error, startMonitor } = useAudioMonitor();
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '48px 24px' }}>
@@ -65,9 +65,15 @@ export default function MicSetup({ onNext }) {
             
             <VolumeHeatBar level={level} />
 
-            <div style={{ padding: '16px', background: 'var(--warn-soft)', color: '#D97706', borderRadius: '8px', fontSize: '14px', fontWeight: 500 }}>
-              Say something out loud to confirm your microphone is working.
-            </div>
+            {isCalibrating ? (
+              <div style={{ padding: '16px', background: 'var(--primary-soft)', color: 'var(--primary)', borderRadius: '8px', fontSize: '14px', fontWeight: 600 }} className="animate-pulse-once">
+                Calibrating ambient noise... Please remain quiet for 5 seconds.
+              </div>
+            ) : (
+              <div style={{ padding: '16px', background: 'var(--warn-soft)', color: '#D97706', borderRadius: '8px', fontSize: '14px', fontWeight: 500 }}>
+                Say something out loud to confirm your microphone is working.
+              </div>
+            )}
           </div>
         )}
 

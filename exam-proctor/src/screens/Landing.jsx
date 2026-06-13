@@ -1,6 +1,8 @@
 import React from 'react';
+import { useExamStore } from '../store/examStore';
 
 export default function Landing({ onNext }) {
+  const candidateName = useExamStore(state => state.candidateName);
   return (
     <div style={{
       minHeight: '100vh',
@@ -41,7 +43,7 @@ export default function Landing({ onNext }) {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
           <div style={{ border: '1px solid var(--border)', padding: '8px 16px', borderRadius: '8px', textAlign: 'center' }}>
             <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Candidate</div>
-            <div style={{ fontSize: '13px', fontWeight: 600 }}>Alex Chen</div>
+            <div style={{ fontSize: '13px', fontWeight: 600 }}>{candidateName}</div>
           </div>
           <div style={{ border: '1px solid var(--border)', padding: '8px 16px', borderRadius: '8px', textAlign: 'center' }}>
             <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Questions</div>

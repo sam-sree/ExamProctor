@@ -8,13 +8,23 @@ export default function ScreenShareSetup({ onNext }) {
 
   const startScreenShare = async () => {
     try {
+      setError(null);
       const mediaStream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
+        video: { displaySurface: "monitor" },
         audio: false
       });
+      
+      const videoTrack = mediaStream.getVideoTracks()[0];
+      const settings = videoTrack ? videoTrack.getSettings() : {};
+      
+      if (settings.displaySurface && settings.displaySurface !== 'monitor') {
+        mediaStream.getTracks().forEach(t => t.stop());
+        setError("You must share your entire screen. Sharing a single window or tab is not allowed.");
+        return;
+      }
+      
       setStream(mediaStream);
       window.screenShareStream = mediaStream;
-      setError(null);
     } catch (err) {
       console.error(err);
       setError("Screen sharing permission denied or cancelled.");

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useProctoringStore } from '../store/proctoringStore';
 import { useExamStore } from '../store/examStore';
 
-export function useCVEvents(isEnabled = false) {
+export function useCVEvents(isEnabled = false, isExam = false) {
   const [isConnected, setIsConnected] = useState(false);
   const [lastFaceEvent, setLastFaceEvent] = useState(null);
   const [lastFrame, setLastFrame] = useState(null);
@@ -14,7 +14,12 @@ export function useCVEvents(isEnabled = false) {
   const sessionId = useExamStore(state => state.sessionId);
   const addWebcamSnapshot = useExamStore(state => state.addWebcamSnapshot);
 
-  const examActive = examStatus === 'active';
+  // Refs to avoid stale closures in WebSocket callbacks
+  const isExamRef = useRef(isExam);
+  const examStatusRef = useRef(examStatus);
+  const fireWarningRef = useRef(fireWarning);
+  const addWebcamSnapshotRef = useRef(addWebcamSnapshot);
+
   const wsRef = useRef(null);
   const streamRef = useRef(null);
   const videoRef = useRef(null);
@@ -24,8 +29,14 @@ export function useCVEvents(isEnabled = false) {
   const retryCountRef = useRef(0);
   const reconnectTimeoutRef = useRef(null);
   const faceDebounceRef = useRef(null);
+  const processingFrameRef = useRef(false);
 
-  // Determine WS URL based on API Base URL
+  // Keep refs in sync
+  useEffect(() => { isExamRef.current = isExam; }, [isExam]);
+  useEffect(() => { examStatusRef.current = examStatus; }, [examStatus]);
+  useEffect(() => { fireWarningRef.current = fireWarning; }, [fireWarning]);
+  useEffect(() => { addWebcamSnapshotRef.current = addWebcamSnapshot; }, [addWebcamSnapshot]);
+
   const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
   const wsProtocol = apiBase.startsWith('https') ? 'wss' : 'ws';
   const wsHost = apiBase.replace(/^https?:\/\//, '');
@@ -33,23 +44,23 @@ export function useCVEvents(isEnabled = false) {
 
   useEffect(() => {
     if (!isEnabled) {
-      // Clean up everything if disabled
       cleanup();
       return;
     }
 
+    console.log(`[useCVEvents] Effect running — isEnabled=${isEnabled}, isExam=${isExam}, isExamRef=${isExamRef.current}`);
+
     const startMedia = async () => {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
+        const mediaStream = await navigator.mediaDevices.getUserMedia({
           video: { width: 640, height: 480 },
           audio: false
         });
-        streamRef.current = stream;
-        setStream(stream);
+        streamRef.current = mediaStream;
+        setStream(mediaStream);
 
-        // Create virtual video element to draw frames from
         const video = document.createElement('video');
-        video.srcObject = stream;
+        video.srcObject = mediaStream;
         video.width = 640;
         video.height = 480;
         video.setAttribute('playsinline', 'true');
@@ -57,7 +68,6 @@ export function useCVEvents(isEnabled = false) {
         video.play();
         videoRef.current = video;
 
-        // Create virtual canvas
         const canvas = document.createElement('canvas');
         canvas.width = 640;
         canvas.height = 480;
@@ -76,12 +86,12 @@ export function useCVEvents(isEnabled = false) {
         wsRef.current.close();
       }
 
-      console.log(`[useCVEvents] Connecting to proctoring service at: ${wsUrl}`);
+      console.log(`[useCVEvents] Connecting to: ${wsUrl}`);
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
       ws.onopen = () => {
-        console.log(`[useCVEvents] WebSocket opened successfully to ${wsUrl}`);
+        console.log(`[useCVEvents] WebSocket opened`);
         setIsConnected(true);
         retryCountRef.current = 0;
         useProctoringStore.setState({ isConnectionLost: false });
@@ -91,18 +101,37 @@ export function useCVEvents(isEnabled = false) {
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          console.log(`[useCVEvents] WebSocket message received:`, data);
+
+          if (data.type === 'FRAME_PROCESSED') {
+            processingFrameRef.current = false;
+            return;
+          }
 
           if (data.type === 'CV_EVENT') {
+            console.log(`[useCVEvents] CV_EVENT received: ${data.event} | isExam=${isExamRef.current}`);
+
             if (['FACE_ABSENT', 'MULTIPLE_FACES', 'FACE_NOMINAL', 'FACE_DETECTED'].includes(data.event)) {
               setLastFaceEvent(data.event);
             }
 
-            if (examActive) {
-              if (data.event === 'FACE_ABSENT') fireWarning('FACE_ABSENT', data);
-              if (data.event === 'MULTIPLE_FACES') fireWarning('MULTIPLE_FACES', data);
-              if (data.event === 'GAZE_DEVIATION') fireWarning('GAZE_DEVIATION', data);
-              if (data.event === 'HEAD_POSE_VIOLATION') fireWarning('HEAD_POSE_VIOLATION', data);
+            if (isExamRef.current) {
+              if (data.event === 'FACE_ABSENT') {
+                console.log('[useCVEvents] Firing FACE_ABSENT warning');
+                fireWarningRef.current('FACE_ABSENT', data);
+                useProctoringStore.setState({ faceViolationActive: true, faceViolationType: 'FACE_ABSENT' });
+              } else if (data.event === 'MULTIPLE_FACES') {
+                console.log('[useCVEvents] Firing MULTIPLE_FACES warning');
+                fireWarningRef.current('MULTIPLE_FACES', data);
+                useProctoringStore.setState({ faceViolationActive: true, faceViolationType: 'MULTIPLE_FACES' });
+              } else if (data.event === 'FACE_NOMINAL' || data.event === 'FACE_DETECTED') {
+                useProctoringStore.setState({ faceViolationActive: false, faceViolationType: null });
+              } else if (data.event === 'GAZE_DEVIATION') {
+                fireWarningRef.current('GAZE_DEVIATION', data);
+              } else if (data.event === 'HEAD_POSE_VIOLATION') {
+                fireWarningRef.current('HEAD_POSE_VIOLATION', data);
+              }
+            } else {
+              console.log('[useCVEvents] CV_EVENT ignored — isExamRef.current is false');
             }
           } else if (data.type === 'SYSTEM') {
             if (data.event === 'CAMERA_ERROR') {
@@ -115,11 +144,11 @@ export function useCVEvents(isEnabled = false) {
       };
 
       ws.onclose = (event) => {
-        console.log(`[useCVEvents] WebSocket closed. Code: ${event.code}, Reason: ${event.reason || 'None'}`);
+        console.log(`[useCVEvents] WebSocket closed. Code: ${event.code}`);
         setIsConnected(false);
         stopCaptureLoops();
 
-        if (!isEnabled || examStatus === 'submitted' || examStatus === 'disqualified') {
+        if (!isEnabled || examStatusRef.current === 'submitted' || examStatusRef.current === 'disqualified') {
           return;
         }
 
@@ -130,23 +159,54 @@ export function useCVEvents(isEnabled = false) {
         if (retries === 1) delay = 2000;
         else if (retries === 2) delay = 4000;
         else if (retries >= 3) {
-          delay = 5000; // Keep retrying in background
+          delay = 5000;
           useProctoringStore.setState({ isConnectionLost: true });
         }
 
-        console.log(`[useCVEvents] Retrying connection in ${delay}ms (attempt ${retries + 1})...`);
+        console.log(`[useCVEvents] Retrying in ${delay}ms (attempt ${retries + 1})`);
         reconnectTimeoutRef.current = setTimeout(connectWS, delay);
       };
 
       ws.onerror = (e) => {
-        console.error("[useCVEvents] WebSocket error event:", e);
+        console.error("[useCVEvents] WebSocket error:", e);
       };
     };
 
     startMedia();
-
     return () => cleanup();
-  }, [isEnabled, examActive, examStatus, wsUrl]);
+  }, [isEnabled, wsUrl]);
+
+  // Snapshot loop reacts to isExam and connection state separately
+  useEffect(() => {
+    if (snapshotIntervalRef.current) {
+      clearInterval(snapshotIntervalRef.current);
+      snapshotIntervalRef.current = null;
+    }
+
+    if (isExam && isConnected) {
+      const canvas = canvasRef.current;
+      const video = videoRef.current;
+      if (canvas && video) {
+        const ctx = canvas.getContext('2d');
+        snapshotIntervalRef.current = setInterval(() => {
+          try {
+            ctx.drawImage(video, 0, 0, 640, 480);
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+            addWebcamSnapshotRef.current({ timestamp: new Date().toISOString(), dataUrl });
+          } catch (e) {
+            console.error("Snapshot capture error:", e);
+          }
+        }, 30000);
+      }
+    }
+
+    return () => {
+      if (snapshotIntervalRef.current) {
+        clearInterval(snapshotIntervalRef.current);
+        snapshotIntervalRef.current = null;
+      }
+    };
+  }, [isExam, isConnected]);
 
   const startCaptureLoops = () => {
     stopCaptureLoops();
@@ -157,16 +217,22 @@ export function useCVEvents(isEnabled = false) {
 
     const ctx = canvas.getContext('2d');
 
-    // 15fps Frame capture loop (approx. 67ms)
     captureIntervalRef.current = setInterval(() => {
       if (!video || !canvas || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+      if (processingFrameRef.current) return;
 
       try {
         ctx.drawImage(video, 0, 0, 640, 480);
         const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
         const base64Data = dataUrl.split(',')[1];
 
-        // Send to server
+        processingFrameRef.current = true;
+
+        // Safety: always unblock frame sending after 500ms even if server is slow/reconnected
+        setTimeout(() => {
+          processingFrameRef.current = false;
+        }, 500);
+
         wsRef.current.send(JSON.stringify({
           type: 'FRAME',
           sessionId: sessionId,
@@ -174,29 +240,12 @@ export function useCVEvents(isEnabled = false) {
           data: base64Data
         }));
 
-        // Render preview locally
         setLastFrame(dataUrl);
       } catch (e) {
         console.error("Frame capture error:", e);
+        processingFrameRef.current = false;
       }
     }, 67);
-
-    // 30-second audit webcam snapshot loop (only if exam is active)
-    if (examActive) {
-      snapshotIntervalRef.current = setInterval(() => {
-        if (!video || !canvas) return;
-        try {
-          ctx.drawImage(video, 0, 0, 640, 480);
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
-          addWebcamSnapshot({
-            timestamp: new Date().toISOString(),
-            dataUrl
-          });
-        } catch (e) {
-          console.error("Snapshot capture error:", e);
-        }
-      }, 30000);
-    }
   };
 
   const stopCaptureLoops = () => {
@@ -212,6 +261,8 @@ export function useCVEvents(isEnabled = false) {
 
   const cleanup = () => {
     stopCaptureLoops();
+    processingFrameRef.current = false;
+    useProctoringStore.setState({ faceViolationActive: false, faceViolationType: null });
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
@@ -235,5 +286,5 @@ export function useCVEvents(isEnabled = false) {
     setIsConnected(false);
   };
 
-  return { isConnected, lastFaceEvent, systemError, lastFrame, stream: stream };
+  return { isConnected, lastFaceEvent, systemError, lastFrame, stream };
 }
