@@ -22,10 +22,11 @@ export default function Briefing({ onEnterExam, onBackToScreenShare }) {
   ];
 
   const handleStart = async () => {
+    const requireScreenShare = import.meta.env.VITE_REQUIRE_SCREEN_SHARE !== 'false';
     const screenStream = window.screenShareStream;
     const isSharing = screenStream && screenStream.getVideoTracks().some(track => track.readyState === 'live');
     
-    if (!isSharing) {
+    if (requireScreenShare && !isSharing) {
       setFullscreenError("Your screen share has disconnected. Please go back and set it up again.");
       return;
     }

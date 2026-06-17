@@ -6,6 +6,9 @@ export default function ScreenShareSetup({ onNext }) {
   const [error, setError] = useState(null);
   const videoRef = useRef(null);
 
+  const requireScreenShare = import.meta.env.VITE_REQUIRE_SCREEN_SHARE !== 'false';
+  const canContinue = stream || !requireScreenShare;
+
   const startScreenShare = async () => {
     try {
       setError(null);
@@ -65,9 +68,14 @@ export default function ScreenShareSetup({ onNext }) {
         
         <div>
           <h2 style={{ fontSize: '24px', fontWeight: 700, marginBottom: '8px' }}>Screen Share Check</h2>
-          <p style={{ fontWeight: 300, color: 'var(--text-secondary)' }}>
+          <p style={{ fontWeight: 300, color: 'var(--text-secondary)', marginBottom: !requireScreenShare ? '12px' : '0px' }}>
             We require sharing your entire screen to monitor desktop activity during the exam.
           </p>
+          {!requireScreenShare && (
+            <div style={{ fontSize: '12px', color: 'var(--primary)', background: 'var(--primary-soft)', border: '1px solid var(--border)', padding: '10px 14px', borderRadius: '8px', fontWeight: 600, display: 'inline-block', width: '100%', boxSizing: 'border-box', marginTop: '8px', textAlign: 'left' }}>
+              ⚠️ Testing Mode Active: Screen sharing requirement bypassed via environment variable. You can proceed without sharing.
+            </div>
+          )}
         </div>
 
         {error && (
@@ -129,16 +137,16 @@ export default function ScreenShareSetup({ onNext }) {
 
         <button 
           onClick={onNext}
-          disabled={!stream}
+          disabled={!canContinue}
           style={{
             width: '100%',
-            background: stream ? 'var(--primary)' : 'var(--border)',
-            color: stream ? 'white' : 'var(--text-disabled)',
+            background: canContinue ? 'var(--primary)' : 'var(--border)',
+            color: canContinue ? 'white' : 'var(--text-disabled)',
             fontWeight: 700,
             fontSize: '14px',
             height: '52px',
             borderRadius: 'var(--radius-btn)',
-            cursor: stream ? 'pointer' : 'not-allowed',
+            cursor: canContinue ? 'pointer' : 'not-allowed',
             transition: 'all 300ms ease'
           }}
         >

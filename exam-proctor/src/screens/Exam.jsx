@@ -118,14 +118,18 @@ export default function Exam({ onDisqualified, onFinished }) {
 
   // 3. Monitor Screen Sharing stream and browser environment
   useEffect(() => {
+    const requireScreenShare = import.meta.env.VITE_REQUIRE_SCREEN_SHARE !== 'false';
+
     // A. Multi-Monitor Heuristic
-    const screenLeft = window.screenLeft ?? window.screenX;
-    const isMultiMonitorSuspected = (
-      window.screen.width > 3000 ||
-      screenLeft < 0 ||
-      screenLeft > window.screen.width
-    );
-    useProctoringStore.setState({ multiMonitorSuspected: isMultiMonitorSuspected });
+    if (requireScreenShare) {
+      const screenLeft = window.screenLeft ?? window.screenX;
+      const isMultiMonitorSuspected = (
+        window.screen.width > 3000 ||
+        screenLeft < 0 ||
+        screenLeft > window.screen.width
+      );
+      useProctoringStore.setState({ multiMonitorSuspected: isMultiMonitorSuspected });
+    }
 
     // B. Screen Share Stream Track Health
     const screenStream = window.screenShareStream;
@@ -142,7 +146,7 @@ export default function Exam({ onDisqualified, onFinished }) {
       }, 15000);
     };
 
-    if (screenStream) {
+    if (requireScreenShare && screenStream) {
       videoTrack = screenStream.getVideoTracks()[0];
       if (videoTrack) {
         videoTrack.addEventListener('ended', handleScreenShareEnded);
