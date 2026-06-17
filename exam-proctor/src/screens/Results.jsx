@@ -41,6 +41,68 @@ export default function Results() {
   const status = serverData?.status || localStatus;
   const warningLog = serverData?.warningLog || localWarningLog;
   const warningCount = serverData?.warningLog ? serverData.warningLog.length : localWarningCount;
+  const proctorOverride = serverData?.proctorOverride || null;
+
+  // Default fallback calculation in React if serverData is not yet fetched or offline
+  const getFallbackTrustworthiness = () => {
+    if (status === 'disqualified') return null;
+    
+    const priorCheat = 0.05;
+    const priorHonest = 0.95;
+    const params = {
+      "GAZE_DEVIATION":        {cheat: 0.60, honest: 0.15},
+      "FACE_ABSENT":           {cheat: 0.50, honest: 0.05},
+      "MULTIPLE_FACES":        {cheat: 0.80, honest: 0.01},
+      "HEAD_POSE_VIOLATION":   {cheat: 0.50, honest: 0.10},
+      "BACKGROUND_AUDIO":      {cheat: 0.40, honest: 0.12},
+      "WINDOW_BLUR":           {cheat: 0.70, honest: 0.08},
+      "PASTE_DETECTED":        {cheat: 0.90, honest: 0.01},
+      "SHORTCUT_ATTEMPT":      {cheat: 0.75, honest: 0.05},
+      "FULLSCREEN_EXIT":       {cheat: 0.85, honest: 0.02},
+      "BLUETOOTH_CONNECTED":   {cheat: 0.95, honest: 0.01}
+    };
+    
+    const counts = {};
+    Object.keys(params).forEach(k => counts[k] = 0);
+    
+    warningLog.forEach(w => {
+      if (counts[w.type] !== undefined) counts[w.type]++;
+    });
+    
+    // Shortcuts
+    const localShortcuts = useProctoringStore.getState().shortcutAttemptLog;
+    counts["SHORTCUT_ATTEMPT"] = localShortcuts.length;
+    
+    if (useProctoringStore.getState().bluetoothDeviceDetected) {
+      counts["BLUETOOTH_CONNECTED"] = Math.max(counts["BLUETOOTH_CONNECTED"], 1);
+    }
+    
+    let odds = priorCheat / priorHonest;
+    Object.keys(counts).forEach(k => {
+      const count = Math.min(counts[k], 3);
+      if (count > 0) {
+        odds *= (params[k].cheat / params[k].honest) ** count;
+      }
+    });
+    
+    const pCheating = odds / (1.0 + odds);
+    return Math.round((1.0 - pCheating) * 1000) / 10;
+  };
+
+  const trustworthinessVal = serverData?.score?.trustworthiness !== undefined 
+    ? serverData.score.trustworthiness 
+    : getFallbackTrustworthiness();
+
+  const getClassification = (score) => {
+    if (status === 'disqualified') return 'disqualified';
+    if (score === null || score === undefined) return 'unknown';
+    const pCheating = 1.0 - (score / 100.0);
+    if (pCheating <= 0.50) return 'approved';
+    if (pCheating <= 0.85) return 'review_required';
+    return 'flagged';
+  };
+  
+  const classification = serverData?.status || getClassification(trustworthinessVal);
 
   // MCQ scoring
   const mcqQuestions = QUESTIONS.filter(q => q.type === 'mcq');
@@ -125,15 +187,48 @@ export default function Results() {
           </div>
         </div>
 
-        {warningCount > 0 && (
-          <div style={{ background: status === 'disqualified' ? 'var(--danger-soft)' : 'var(--warn-soft)', color: status === 'disqualified' ? 'var(--danger)' : '#D97706', padding: '16px 24px', borderRadius: '12px', display: 'flex', gap: '12px', alignItems: 'center', fontWeight: 500 }}>
+        {status === 'disqualified' && (
+          <div style={{ 
+            background: 'var(--danger-soft)', 
+            border: '2.5px solid var(--danger)', 
+            color: 'var(--danger)', 
+            padding: '24px', 
+            borderRadius: '16px', 
+            textAlign: 'center', 
+            boxShadow: 'var(--shadow-card)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '12px',
+            alignItems: 'center'
+          }} className="animate-slide-up">
+            <AlertTriangle size={40} color="var(--danger)" />
+            <div>
+              <h3 style={{ fontSize: '20px', fontWeight: 800, marginBottom: '6px' }}>Session Disqualified</h3>
+              <p style={{ fontSize: '14px', opacity: 0.9, lineHeight: 1.5, maxWidth: '600px' }}>
+                This exam session was automatically terminated due to critical proctoring policy violations (disqualification threshold of 85% cheat probability exceeded). The final score has been locked and flagged for review.
+              </p>
+              {proctorOverride && (
+                <div style={{ fontSize: '12px', fontStyle: 'italic', color: 'var(--text-secondary)', marginTop: '8px' }}>
+                  (Manually overridden by Administrator to: <strong>{proctorOverride.toUpperCase()}</strong>)
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {status !== 'disqualified' && warningCount > 0 && (
+          <div style={{ background: 'var(--warn-soft)', color: '#D97706', padding: '16px 24px', borderRadius: '12px', display: 'flex', gap: '12px', alignItems: 'center', fontWeight: 500 }}>
             <AlertTriangle size={20} />
             This session included {warningCount} flagged events. Results are subject to administrator review.
           </div>
         )}
 
         {/* Stats */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '24px' }}>
+        <div style={{ 
+          display: 'grid', 
+          gridTemplateColumns: status === 'disqualified' ? 'repeat(3, 1fr)' : 'repeat(4, 1fr)', 
+          gap: '24px' 
+        }}>
           <div style={{ background: 'var(--surface)', padding: '24px', borderRadius: 'var(--radius-card)', boxShadow: 'var(--shadow-card)', textAlign: 'center' }}>
             <div style={{ fontSize: '13px', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600, marginBottom: '8px' }}>MCQ Score</div>
             <div style={{ fontSize: '36px', fontWeight: 800, color: 'var(--primary)' }}>{correct} <span style={{ fontSize: '20px', color: 'var(--text-disabled)' }}>/ 5</span></div>
@@ -145,11 +240,56 @@ export default function Results() {
             </div>
           </div>
           <div style={{ background: 'var(--surface)', padding: '24px', borderRadius: 'var(--radius-card)', boxShadow: 'var(--shadow-card)', textAlign: 'center' }}>
-            <div style={{ fontSize: '13px', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600, marginBottom: '8px' }}>Warnings</div>
-            <div style={{ fontSize: '36px', fontWeight: 800, color: warningCount === 0 ? 'var(--success)' : warningCount >= 3 ? 'var(--danger)' : 'var(--warn)' }}>
-              {warningCount} <span style={{ fontSize: '20px', color: 'var(--text-disabled)' }}>/ 3</span>
+            <div style={{ fontSize: '13px', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600, marginBottom: '8px' }}>Warnings Logged</div>
+            <div style={{ fontSize: '36px', fontWeight: 800, color: warningCount === 0 ? 'var(--success)' : status === 'disqualified' ? 'var(--danger)' : 'var(--warn)' }}>
+              {warningCount}
             </div>
           </div>
+          
+          {status !== 'disqualified' && (
+            <div style={{ 
+              background: 'var(--surface)', 
+              padding: '24px', 
+              borderRadius: 'var(--radius-card)', 
+              boxShadow: 'var(--shadow-card)', 
+              textAlign: 'center',
+              border: `1.5px solid ${
+                classification === 'approved' ? 'var(--success)' : 
+                classification === 'review_required' ? 'var(--warn)' : 'var(--danger)'
+              }`,
+              position: 'relative',
+              overflow: 'hidden'
+            }}>
+              <div style={{ fontSize: '13px', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600, marginBottom: '8px' }}>Trustworthiness</div>
+              <div style={{ 
+                fontSize: '36px', 
+                fontWeight: 800, 
+                color: 
+                  classification === 'approved' ? 'var(--success)' : 
+                  classification === 'review_required' ? 'var(--warn)' : 'var(--danger)'
+              }}>
+                {trustworthinessVal !== null ? `${trustworthinessVal}%` : 'N/A'}
+              </div>
+              <div style={{ 
+                fontSize: '11px', 
+                fontWeight: 700, 
+                textTransform: 'uppercase', 
+                letterSpacing: '0.05em',
+                marginTop: '4px',
+                color: 
+                  classification === 'approved' ? 'var(--success)' : 
+                  classification === 'review_required' ? 'var(--warn)' : 'var(--danger)'
+              }}>
+                {classification === 'approved' ? 'Approved' : 
+                 classification === 'review_required' ? 'Review Required' : 'Flagged'}
+              </div>
+              {proctorOverride && (
+                <div style={{ fontSize: '10px', fontStyle: 'italic', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                  (Override: {proctorOverride.toUpperCase()})
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Charts */}

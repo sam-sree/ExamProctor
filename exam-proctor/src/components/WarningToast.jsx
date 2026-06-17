@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { useProctoringStore } from '../store/proctoringStore';
-import WarningDots from './WarningDots';
+import DisqualificationRiskBar from './DisqualificationRiskBar';
 
 export default function WarningToast() {
   const [toast, setToast] = useState(null);
@@ -14,10 +14,7 @@ export default function WarningToast() {
       if (['SHORTCUT_ATTEMPT', 'CLOSE_ATTEMPT'].includes(entry.type)) return;
       
       setToast(entry);
-      
-      if (entry.count < 3) {
-        setTimeout(() => setToast(null), 4000);
-      }
+      setTimeout(() => setToast(null), 4000);
     };
 
     window.addEventListener('proctor-warning', handleWarning);
@@ -57,13 +54,13 @@ export default function WarningToast() {
       <AlertTriangle color="var(--warn)" size={24} />
       <div style={{ flex: 1, minWidth: '200px' }}>
         <div style={{ fontWeight: 700, fontSize: '14px', color: 'var(--warn)' }}>
-          Warning {toast.count} of 3
+          Warning {toast.count}
         </div>
         <div style={{ fontSize: '13px', color: 'var(--text-primary)' }}>
           {descriptions[toast.type] || 'Proctoring violation detected.'}
         </div>
       </div>
-      <WarningDots count={toast.count} />
+      <DisqualificationRiskBar showLabel={false} width="80px" />
     </div>
   );
 }

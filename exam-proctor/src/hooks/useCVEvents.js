@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { useProctoringStore } from '../store/proctoringStore';
 import { useExamStore } from '../store/examStore';
+import { FilesetResolver, FaceLandmarker } from "@mediapipe/tasks-vision";
+import { analyzeBrightness, analyzeFaces, checkGazeAndPose } from '../utils/localCV';
 
 export function useCVEvents(isEnabled = false, isExam = false) {
   const [isConnected, setIsConnected] = useState(false);
@@ -14,33 +16,141 @@ export function useCVEvents(isEnabled = false, isExam = false) {
   const sessionId = useExamStore(state => state.sessionId);
   const addWebcamSnapshot = useExamStore(state => state.addWebcamSnapshot);
 
-  // Refs to avoid stale closures in WebSocket callbacks
+  // Refs to avoid stale closures in event listeners
   const isExamRef = useRef(isExam);
   const examStatusRef = useRef(examStatus);
   const fireWarningRef = useRef(fireWarning);
   const addWebcamSnapshotRef = useRef(addWebcamSnapshot);
 
-  const wsRef = useRef(null);
   const streamRef = useRef(null);
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
-  const captureIntervalRef = useRef(null);
   const snapshotIntervalRef = useRef(null);
-  const retryCountRef = useRef(0);
-  const reconnectTimeoutRef = useRef(null);
-  const faceDebounceRef = useRef(null);
   const processingFrameRef = useRef(false);
 
-  // Keep refs in sync
+  const isBurstActiveRef = useRef(false);
+  const burstEndTimeRef = useRef(0);
+  const captureTimeoutRef = useRef(null);
+
+  const landmarkerRef = useRef(null);
+  const lastBrightnessEventRef = useRef("ROOM_BRIGHT_ENOUGH");
+
+  const triggerBurst = () => {
+    burstEndTimeRef.current = Date.now() + 2500;
+    if (!isBurstActiveRef.current) {
+      isBurstActiveRef.current = true;
+      if (captureTimeoutRef.current) {
+        clearTimeout(captureTimeoutRef.current);
+      }
+      runCaptureLoop();
+    }
+  };
+
+  const runCaptureLoop = async () => {
+    if (captureTimeoutRef.current) {
+      clearTimeout(captureTimeoutRef.current);
+    }
+
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    const landmarker = landmarkerRef.current;
+
+    // Check if video metadata is loaded and video is playing
+    if (!video || !canvas || !landmarker || video.readyState < 2) {
+      captureTimeoutRef.current = setTimeout(runCaptureLoop, 333);
+      return;
+    }
+
+    const now = Date.now();
+    let delay = 5000; // 0.2fps default (1 frame every 5s)
+
+    if (now < burstEndTimeRef.current) {
+      delay = 67; // 15fps burst
+      isBurstActiveRef.current = true;
+    } else {
+      isBurstActiveRef.current = false;
+    }
+
+    if (!processingFrameRef.current) {
+      processingFrameRef.current = true;
+      try {
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(video, 0, 0, 640, 480);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+        setLastFrame(dataUrl);
+
+        // 1. Analyze Brightness locally
+        const brightRes = analyzeBrightness(canvas, lastBrightnessEventRef.current);
+        if (brightRes.changed) {
+          lastBrightnessEventRef.current = brightRes.event;
+          if (brightRes.event === 'ROOM_TOO_DARK') {
+            useProctoringStore.setState({ roomTooDark: true });
+          } else if (brightRes.event === 'ROOM_BRIGHT_ENOUGH') {
+            useProctoringStore.setState({ roomTooDark: false });
+          }
+        }
+
+        // 2. Local Face Landmarking
+        const timestampMs = performance.now();
+        const detectionResult = landmarker.detectForVideo(video, timestampMs);
+
+        // 3. Analyze Face Presence
+        const faceRes = analyzeFaces(detectionResult.faceLandmarks, 640, 480);
+
+        if (faceRes.event === "FACE_ABSENT") {
+          if (lastFaceEvent !== "FACE_ABSENT") {
+            setLastFaceEvent("FACE_ABSENT");
+          }
+          if (isExamRef.current) {
+            fireWarningRef.current('FACE_ABSENT', faceRes);
+            useProctoringStore.setState({ faceViolationActive: true, faceViolationType: 'FACE_ABSENT' });
+          }
+        } else if (faceRes.event === "MULTIPLE_FACES") {
+          if (lastFaceEvent !== "MULTIPLE_FACES") {
+            setLastFaceEvent("MULTIPLE_FACES");
+          }
+          if (isExamRef.current) {
+            fireWarningRef.current('MULTIPLE_FACES', faceRes);
+            useProctoringStore.setState({ faceViolationActive: true, faceViolationType: 'MULTIPLE_FACES' });
+          }
+        } else {
+          // Nominal face detected
+          if (lastFaceEvent !== "FACE_NOMINAL" && lastFaceEvent !== "FACE_DETECTED") {
+            setLastFaceEvent("FACE_DETECTED");
+          }
+          useProctoringStore.setState({ faceViolationActive: false, faceViolationType: null });
+
+          // 4. Gaze and Pose tracking (only if single candidate face is verified)
+          const validFaces = faceRes.faces || [];
+          if (validFaces.length === 1) {
+            const gazeRes = checkGazeAndPose(validFaces[0], 640, 480);
+            
+            if (gazeRes.event === 'GAZE_DEVIATION') {
+              if (isExamRef.current) {
+                fireWarningRef.current('GAZE_DEVIATION', gazeRes);
+              }
+            } else if (gazeRes.event === 'HEAD_POSE_VIOLATION') {
+              if (isExamRef.current) {
+                fireWarningRef.current('HEAD_POSE_VIOLATION', gazeRes);
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.error("[useCVEvents] Local processing loop error:", err);
+      } finally {
+        processingFrameRef.current = false;
+      }
+    }
+
+    captureTimeoutRef.current = setTimeout(runCaptureLoop, delay);
+  };
+
+  // Sync refs
   useEffect(() => { isExamRef.current = isExam; }, [isExam]);
   useEffect(() => { examStatusRef.current = examStatus; }, [examStatus]);
   useEffect(() => { fireWarningRef.current = fireWarning; }, [fireWarning]);
   useEffect(() => { addWebcamSnapshotRef.current = addWebcamSnapshot; }, [addWebcamSnapshot]);
-
-  const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
-  const wsProtocol = apiBase.startsWith('https') ? 'wss' : 'ws';
-  const wsHost = apiBase.replace(/^https?:\/\//, '');
-  const wsUrl = `${wsProtocol}://${wsHost}/ws/proctor/${sessionId}`;
 
   useEffect(() => {
     if (!isEnabled) {
@@ -48,10 +158,11 @@ export function useCVEvents(isEnabled = false, isExam = false) {
       return;
     }
 
-    console.log(`[useCVEvents] Effect running — isEnabled=${isEnabled}, isExam=${isExam}, isExamRef=${isExamRef.current}`);
+    console.log(`[useCVEvents] Starting Local Proctoring Hook: isEnabled=${isEnabled}, isExam=${isExam}`);
 
-    const startMedia = async () => {
+    const startMediaAndModel = async () => {
       try {
+        // Request webcam access
         const mediaStream = await navigator.mediaDevices.getUserMedia({
           video: { width: 640, height: 480 },
           audio: false
@@ -65,118 +176,53 @@ export function useCVEvents(isEnabled = false, isExam = false) {
         video.height = 480;
         video.setAttribute('playsinline', 'true');
         video.setAttribute('muted', 'true');
-        video.play();
         videoRef.current = video;
+        await video.play();
 
         const canvas = document.createElement('canvas');
         canvas.width = 640;
         canvas.height = 480;
         canvasRef.current = canvas;
 
-        connectWS();
-      } catch (err) {
-        console.error("Failed to access camera", err);
-        setSystemError("Camera access denied or unavailable.");
-      }
-    };
+        // Initialize local WebAssembly MediaPipe task
+        console.log("[useCVEvents] Loading FaceLandmarker WebAssembly engine...");
+        const vision = await FilesetResolver.forVisionTasks(
+          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.15/wasm"
+        );
+        const landmarker = await FaceLandmarker.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+            delegate: "GPU"
+          },
+          runningMode: "VIDEO",
+          numFaces: 2
+        });
+        landmarkerRef.current = landmarker;
+        console.log("[useCVEvents] Local FaceLandmarker ready.");
 
-    const connectWS = () => {
-      if (wsRef.current) {
-        wsRef.current.onclose = null;
-        wsRef.current.close();
-      }
-
-      console.log(`[useCVEvents] Connecting to: ${wsUrl}`);
-      const ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        console.log(`[useCVEvents] WebSocket opened`);
         setIsConnected(true);
-        retryCountRef.current = 0;
-        useProctoringStore.setState({ isConnectionLost: false });
-        startCaptureLoops();
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-
-          if (data.type === 'FRAME_PROCESSED') {
-            processingFrameRef.current = false;
-            return;
-          }
-
-          if (data.type === 'CV_EVENT') {
-            console.log(`[useCVEvents] CV_EVENT received: ${data.event} | isExam=${isExamRef.current}`);
-
-            if (['FACE_ABSENT', 'MULTIPLE_FACES', 'FACE_NOMINAL', 'FACE_DETECTED'].includes(data.event)) {
-              setLastFaceEvent(data.event);
-            }
-
-            if (isExamRef.current) {
-              if (data.event === 'FACE_ABSENT') {
-                console.log('[useCVEvents] Firing FACE_ABSENT warning');
-                fireWarningRef.current('FACE_ABSENT', data);
-                useProctoringStore.setState({ faceViolationActive: true, faceViolationType: 'FACE_ABSENT' });
-              } else if (data.event === 'MULTIPLE_FACES') {
-                console.log('[useCVEvents] Firing MULTIPLE_FACES warning');
-                fireWarningRef.current('MULTIPLE_FACES', data);
-                useProctoringStore.setState({ faceViolationActive: true, faceViolationType: 'MULTIPLE_FACES' });
-              } else if (data.event === 'FACE_NOMINAL' || data.event === 'FACE_DETECTED') {
-                useProctoringStore.setState({ faceViolationActive: false, faceViolationType: null });
-              } else if (data.event === 'GAZE_DEVIATION') {
-                fireWarningRef.current('GAZE_DEVIATION', data);
-              } else if (data.event === 'HEAD_POSE_VIOLATION') {
-                fireWarningRef.current('HEAD_POSE_VIOLATION', data);
-              }
-            } else {
-              console.log('[useCVEvents] CV_EVENT ignored — isExamRef.current is false');
-            }
-          } else if (data.type === 'SYSTEM') {
-            if (data.event === 'CAMERA_ERROR') {
-              setSystemError(data.message);
-            }
-          }
-        } catch (e) {
-          console.error("[useCVEvents] Failed to parse WS message", e);
-        }
-      };
-
-      ws.onclose = (event) => {
-        console.log(`[useCVEvents] WebSocket closed. Code: ${event.code}`);
-        setIsConnected(false);
-        stopCaptureLoops();
-
-        if (!isEnabled || examStatusRef.current === 'submitted' || examStatusRef.current === 'disqualified') {
-          return;
-        }
-
-        const retries = retryCountRef.current;
-        retryCountRef.current = retries + 1;
-
-        let delay = 1000;
-        if (retries === 1) delay = 2000;
-        else if (retries === 2) delay = 4000;
-        else if (retries >= 3) {
-          delay = 5000;
-          useProctoringStore.setState({ isConnectionLost: true });
-        }
-
-        console.log(`[useCVEvents] Retrying in ${delay}ms (attempt ${retries + 1})`);
-        reconnectTimeoutRef.current = setTimeout(connectWS, delay);
-      };
-
-      ws.onerror = (e) => {
-        console.error("[useCVEvents] WebSocket error:", e);
-      };
+        runCaptureLoop();
+      } catch (err) {
+        console.error("[useCVEvents] Setup failed:", err);
+        setSystemError("Webcam access denied or proctoring engine failed to initialize.");
+      }
     };
 
-    startMedia();
-    return () => cleanup();
-  }, [isEnabled, wsUrl]);
+    const handleTriggerBurst = () => {
+      triggerBurst();
+    };
+    window.addEventListener('proctor-trigger-burst', handleTriggerBurst);
+    window.addEventListener('proctor-warning', handleTriggerBurst);
 
-  // Snapshot loop reacts to isExam and connection state separately
+    startMediaAndModel();
+    return () => {
+      cleanup();
+      window.removeEventListener('proctor-trigger-burst', handleTriggerBurst);
+      window.removeEventListener('proctor-warning', handleTriggerBurst);
+    };
+  }, [isEnabled]);
+
+  // Periodic Snapshot upload
   useEffect(() => {
     if (snapshotIntervalRef.current) {
       clearInterval(snapshotIntervalRef.current);
@@ -208,74 +254,30 @@ export function useCVEvents(isEnabled = false, isExam = false) {
     };
   }, [isExam, isConnected]);
 
-  const startCaptureLoops = () => {
-    stopCaptureLoops();
-
-    const canvas = canvasRef.current;
-    const video = videoRef.current;
-    if (!canvas || !video) return;
-
-    const ctx = canvas.getContext('2d');
-
-    captureIntervalRef.current = setInterval(() => {
-      if (!video || !canvas || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-      if (processingFrameRef.current) return;
-
-      try {
-        ctx.drawImage(video, 0, 0, 640, 480);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
-        const base64Data = dataUrl.split(',')[1];
-
-        processingFrameRef.current = true;
-
-        // Safety: always unblock frame sending after 500ms even if server is slow/reconnected
-        setTimeout(() => {
-          processingFrameRef.current = false;
-        }, 500);
-
-        wsRef.current.send(JSON.stringify({
-          type: 'FRAME',
-          sessionId: sessionId,
-          timestamp: new Date().toISOString(),
-          data: base64Data
-        }));
-
-        setLastFrame(dataUrl);
-      } catch (e) {
-        console.error("Frame capture error:", e);
-        processingFrameRef.current = false;
-      }
-    }, 67);
-  };
-
-  const stopCaptureLoops = () => {
-    if (captureIntervalRef.current) {
-      clearInterval(captureIntervalRef.current);
-      captureIntervalRef.current = null;
+  const cleanup = () => {
+    if (captureTimeoutRef.current) {
+      clearTimeout(captureTimeoutRef.current);
+      captureTimeoutRef.current = null;
     }
     if (snapshotIntervalRef.current) {
       clearInterval(snapshotIntervalRef.current);
       snapshotIntervalRef.current = null;
     }
-  };
-
-  const cleanup = () => {
-    stopCaptureLoops();
+    isBurstActiveRef.current = false;
+    burstEndTimeRef.current = 0;
     processingFrameRef.current = false;
-    useProctoringStore.setState({ faceViolationActive: false, faceViolationType: null });
-    if (reconnectTimeoutRef.current) {
-      clearTimeout(reconnectTimeoutRef.current);
-      reconnectTimeoutRef.current = null;
+
+    useProctoringStore.setState({ faceViolationActive: false, faceViolationType: null, roomTooDark: false });
+
+    if (landmarkerRef.current) {
+      try {
+        landmarkerRef.current.close();
+      } catch (e) {
+        console.error("[useCVEvents] Error closing FaceLandmarker:", e);
+      }
+      landmarkerRef.current = null;
     }
-    if (faceDebounceRef.current) {
-      clearTimeout(faceDebounceRef.current);
-      faceDebounceRef.current = null;
-    }
-    if (wsRef.current) {
-      wsRef.current.onclose = null;
-      wsRef.current.close();
-      wsRef.current = null;
-    }
+
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(t => t.stop());
       streamRef.current = null;

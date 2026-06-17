@@ -174,7 +174,7 @@ export default function FullscreenBlocker() {
         )}
 
         <div style={{ fontSize: '13px', color: 'var(--text-secondary)', fontWeight: 500, marginTop: '8px' }}>
-          Current Warnings: <strong style={{ color: warningCount >= 2 ? 'var(--danger)' : 'var(--text-primary)' }}>{warningCount} of 3</strong>
+          Current Warnings: <strong style={{ color: warningCount > 0 ? 'var(--danger)' : 'var(--text-primary)' }}>{warningCount}</strong>
         </div>
 
         <button

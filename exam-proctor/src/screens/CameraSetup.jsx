@@ -8,6 +8,7 @@ export default function CameraSetup({ onNext }) {
   const [flaggedDevices, setFlaggedDevices] = useState([]);
   const [bluetoothCheckbox, setBluetoothCheckbox] = useState(false);
   const [checkboxMessage, setCheckboxMessage] = useState('');
+  const roomTooDark = useProctoringStore(state => state.roomTooDark);
 
   // Start CV events connection in setup mode to scan face
   const { isConnected, lastFaceEvent, systemError, stream } = useCVEvents(true);
@@ -24,16 +25,11 @@ export default function CameraSetup({ onNext }) {
       
       setFlaggedDevices(flagged);
       
+      const setBluetoothDeviceDetected = useProctoringStore.getState().setBluetoothDeviceDetected;
       if (flagged.length > 0) {
-        useProctoringStore.setState({
-          bluetoothDeviceDetected: true,
-          detectedBluetoothDevices: flagged.map(f => f.label)
-        });
+        setBluetoothDeviceDetected(true, flagged.map(f => f.label));
       } else {
-        useProctoringStore.setState({
-          bluetoothDeviceDetected: false,
-          detectedBluetoothDevices: []
-        });
+        setBluetoothDeviceDetected(false, []);
       }
       return flagged.length;
     } catch (err) {
@@ -72,6 +68,7 @@ export default function CameraSetup({ onNext }) {
 
   const getStatusColor = () => {
     if (!isConnected) return 'var(--warn)';
+    if (roomTooDark) return 'var(--danger)';
     if (lastFaceEvent === 'FACE_DETECTED' || lastFaceEvent === 'FACE_NOMINAL') return 'var(--success)';
     if (lastFaceEvent === 'MULTIPLE_FACES' || lastFaceEvent === 'FACE_ABSENT') return 'var(--danger)';
     return 'var(--text-disabled)';
@@ -80,6 +77,7 @@ export default function CameraSetup({ onNext }) {
   const getStatusText = () => {
     if (systemError) return `Camera Error: ${systemError}`;
     if (!isConnected) return "Connecting to proctoring service...";
+    if (roomTooDark) return "Room is too dark - please move to a brighter place";
     if (lastFaceEvent === 'FACE_DETECTED' || lastFaceEvent === 'FACE_NOMINAL') return "Face detected - good position";
     if (lastFaceEvent === 'MULTIPLE_FACES') return "Multiple faces detected - ensure you are alone";
     if (lastFaceEvent === 'FACE_ABSENT') return "No face detected - position yourself in frame";
@@ -87,11 +85,11 @@ export default function CameraSetup({ onNext }) {
   };
 
   // Ready to continue only if:
-  // 1. Face is detected and nominal
+  // 1. Face is detected and nominal, and room is not too dark
   // 2. Either no bluetooth devices are flagged, OR bluetooth devices were flagged but user checked the confirmation box
   const hasBluetoothAdvisory = flaggedDevices.length > 0;
   const isBluetoothReady = !hasBluetoothAdvisory || bluetoothCheckbox;
-  const isFaceReady = isConnected && (lastFaceEvent === 'FACE_NOMINAL' || lastFaceEvent === 'FACE_DETECTED');
+  const isFaceReady = isConnected && !roomTooDark && (lastFaceEvent === 'FACE_NOMINAL' || lastFaceEvent === 'FACE_DETECTED');
   const isReady = isFaceReady && isBluetoothReady;
 
   return (

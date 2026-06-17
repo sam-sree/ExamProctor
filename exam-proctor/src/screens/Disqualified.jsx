@@ -63,14 +63,14 @@ export default function Disqualified({ onExit }) {
         <div>
           <h1 style={{ fontSize: '28px', fontWeight: 800, color: 'var(--danger)', marginBottom: '12px' }}>Exam Terminated</h1>
           <p style={{ color: 'var(--text-primary)', lineHeight: 1.6, fontWeight: 400 }}>
-            You have received 3 integrity violations. Your exam session has been automatically terminated and the administrator has been notified.
+            Your exam session has been automatically terminated due to high suspicion of proctoring policy violations. The administrator has been notified.
           </p>
         </div>
 
         <div style={{ width: '100%', textAlign: 'left', marginTop: '16px' }}>
           <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', marginBottom: '12px', letterSpacing: '0.05em' }}>Violation Log</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {warningLog.filter(w => !['SHORTCUT_ATTEMPT', 'CLOSE_ATTEMPT'].includes(w.type)).slice(0, 3).map((w, idx) => (
+            {warningLog.filter(w => !['SHORTCUT_ATTEMPT', 'CLOSE_ATTEMPT'].includes(w.type)).map((w, idx) => (
               <div key={idx} style={{ padding: '12px 16px', border: '1px solid var(--danger-soft)', background: 'white', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontSize: '14px', fontWeight: 500 }}>{descriptions[w.type] || w.type}</span>
                 <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>

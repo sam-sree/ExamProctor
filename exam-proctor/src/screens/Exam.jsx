@@ -4,7 +4,7 @@ import { useProctoringStore } from '../store/proctoringStore';
 import { useCVEvents } from '../hooks/useCVEvents';
 import { useAudioMonitor } from '../hooks/useAudioMonitor';
 import TimerBar from '../components/TimerBar';
-import WarningDots from '../components/WarningDots';
+import DisqualificationRiskBar from '../components/DisqualificationRiskBar';
 import QuestionMCQ from '../components/QuestionMCQ';
 import QuestionText from '../components/QuestionText';
 import FullscreenBlocker from '../components/FullscreenBlocker';
@@ -47,7 +47,8 @@ export default function Exam({ onDisqualified, onFinished }) {
   const isFullscreenExited = useProctoringStore(state => state.isFullscreenExited);
   const faceViolationActive = useProctoringStore(state => state.faceViolationActive);
   const faceViolationType = useProctoringStore(state => state.faceViolationType);
-  const isPaused = isConnectionLost || isFullscreenExited || isScreenShareEnded || faceViolationActive;
+  const roomTooDark = useProctoringStore(state => state.roomTooDark);
+  const isPaused = isConnectionLost || isFullscreenExited || isScreenShareEnded || faceViolationActive || roomTooDark;
 
   // Start the exam when component mounts
   useEffect(() => {
@@ -305,10 +306,7 @@ export default function Exam({ onDisqualified, onFinished }) {
           // If we haven't already marked it detected in the store, log the warning
           if (!currentStore.bluetoothDeviceDetected) {
             currentStore.fireWarning('BLUETOOTH_CONNECTED', { devices: flagged.map(f => f.label) });
-            useProctoringStore.setState({ 
-              bluetoothDeviceDetected: true,
-              detectedBluetoothDevices: flagged.map(f => f.label)
-            });
+            currentStore.setBluetoothDeviceDetected(true, flagged.map(f => f.label));
           }
         }
       } catch (err) {
@@ -471,8 +469,42 @@ export default function Exam({ onDisqualified, onFinished }) {
               }
             </p>
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '10px 16px', background: 'var(--warn-soft)', color: 'var(--warn)', borderRadius: '8px', fontWeight: 600, fontSize: '14px' }}>
-              Warnings logged: {warningCount} of 3
+              Warnings logged: {warningCount}
             </div>
+          </div>
+        </div>
+      )}
+
+      {roomTooDark && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(240, 244, 255, 0.85)',
+          backdropFilter: 'blur(16px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9998,
+          transition: 'all 0.3s ease'
+        }}>
+          <div style={{
+            background: 'var(--surface)',
+            padding: '48px',
+            borderRadius: 'var(--radius-card)',
+            boxShadow: 'var(--shadow-card)',
+            textAlign: 'center',
+            maxWidth: '500px',
+            border: '2px solid var(--warn)'
+          }} className="animate-slide-up">
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '20px' }}>
+              <AlertCircle size={48} color="var(--warn)" />
+            </div>
+            <h3 style={{ fontSize: '24px', fontWeight: 700, marginBottom: '16px', color: 'var(--text-primary)' }}>
+              Test Paused - Room Too Dark
+            </h3>
+            <p style={{ color: 'var(--text-secondary)', marginBottom: '24px', lineHeight: 1.6, fontSize: '15px' }}>
+              The lighting in your room is too low for proctoring. Please move to a brighter place to resume the test.
+            </p>
           </div>
         </div>
       )}
@@ -531,9 +563,9 @@ export default function Exam({ onDisqualified, onFinished }) {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
             <span style={{ color: 'var(--text-secondary)', fontSize: '12px', fontWeight: 500 }}>Q {currentIndex + 1} of {QUESTIONS.length}</span>
-            <WarningDots count={warningCount} />
+            <DisqualificationRiskBar />
           </div>
           <button 
             onClick={() => setShowSubmitConfirm(true)}

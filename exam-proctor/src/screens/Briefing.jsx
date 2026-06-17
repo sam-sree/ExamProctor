@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Eye, Mic, User, Lock, Monitor, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { useProctoringStore } from '../store/proctoringStore';
+import DisqualificationRiskBar from '../components/DisqualificationRiskBar';
 
 export default function Briefing({ onEnterExam, onBackToScreenShare }) {
   const [agreed, setAgreed] = useState(false);
@@ -17,7 +18,7 @@ export default function Briefing({ onEnterExam, onBackToScreenShare }) {
     { icon: User, text: "Only you should be present in your room." },
     { icon: Lock, text: "This window cannot be minimized or closed until you submit." },
     { icon: Monitor, text: "If you are using multiple monitors, disconnect all secondary displays before beginning. The system cannot fully verify single-monitor compliance; use of additional monitors will be flagged in the administrator report." },
-    { icon: AlertTriangle, text: "3 warnings result in automatic disqualification. The exam administrator will be notified." }
+    { icon: AlertTriangle, text: "A high suspicion score results in automatic disqualification. The exam administrator will be notified." }
   ];
 
   const handleStart = async () => {
@@ -83,16 +84,11 @@ export default function Briefing({ onEnterExam, onBackToScreenShare }) {
           ))}
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', padding: '24px', background: 'var(--bg)', borderRadius: '12px' }}>
-          <div style={{ display: 'flex', gap: '16px' }}>
-            {[1, 2, 3].map(n => (
-              <div key={n} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
-                <div style={{ width: '32px', height: '32px', borderRadius: '50%', border: '2px solid var(--border)', display: 'flex', alignItems:'center', justifyContent:'center', color: 'var(--text-disabled)', fontWeight: 600 }}>{n}</div>
-                <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Warning {n}</span>
-              </div>
-            ))}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px', padding: '24px', background: 'var(--bg)', borderRadius: '12px', width: '100%' }}>
+          <DisqualificationRiskBar width="100%" />
+          <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text-secondary)', textAlign: 'center', lineHeight: 1.5 }}>
+            Suspicion Level tracks proctoring events. Minor actions raise it slightly, while severe violations (like switching windows) raise it significantly. If the suspicion bar reaches 100%, the session will automatically terminate.
           </div>
-          <div style={{ fontSize: '13px', fontWeight: 500, marginTop: '8px' }}>You currently have 0 warnings.</div>
         </div>
 
         <label style={{ display: 'flex', gap: '12px', alignItems: 'center', cursor: 'pointer', padding: '16px', border: '1px solid var(--border)', borderRadius: '8px' }}>
