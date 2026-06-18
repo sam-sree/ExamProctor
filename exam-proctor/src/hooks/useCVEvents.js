@@ -35,6 +35,11 @@ export function useCVEvents(isEnabled = false, isExam = false) {
   const landmarkerRef = useRef(null);
   const lastBrightnessEventRef = useRef("ROOM_BRIGHT_ENOUGH");
 
+  // Sustained-duration tracking: violation must persist for 3s before firing a warning
+  const gazeViolationStartRef = useRef(null);
+  const headViolationStartRef = useRef(null);
+  const VIOLATION_DURATION_MS = 3000;
+
   const triggerBurst = () => {
     burstEndTimeRef.current = Date.now() + 2500;
     if (!isBurstActiveRef.current) {
@@ -124,15 +129,30 @@ export function useCVEvents(isEnabled = false, isExam = false) {
           const validFaces = faceRes.faces || [];
           if (validFaces.length === 1) {
             const gazeRes = checkGazeAndPose(validFaces[0], 640, 480);
-            
+            const gazeNow = Date.now();
+
             if (gazeRes.event === 'GAZE_DEVIATION') {
-              if (isExamRef.current) {
+              // Reset head timer since gaze is the active violation
+              headViolationStartRef.current = null;
+              if (gazeViolationStartRef.current === null) {
+                gazeViolationStartRef.current = gazeNow;
+              } else if (isExamRef.current && (gazeNow - gazeViolationStartRef.current) >= VIOLATION_DURATION_MS) {
                 fireWarningRef.current('GAZE_DEVIATION', gazeRes);
+                gazeViolationStartRef.current = gazeNow; // Reset so next 3s is required for the next warning
               }
             } else if (gazeRes.event === 'HEAD_POSE_VIOLATION') {
-              if (isExamRef.current) {
+              // Reset gaze timer since head is the active violation
+              gazeViolationStartRef.current = null;
+              if (headViolationStartRef.current === null) {
+                headViolationStartRef.current = gazeNow;
+              } else if (isExamRef.current && (gazeNow - headViolationStartRef.current) >= VIOLATION_DURATION_MS) {
                 fireWarningRef.current('HEAD_POSE_VIOLATION', gazeRes);
+                headViolationStartRef.current = gazeNow; // Reset so next 3s is required for the next warning
               }
+            } else {
+              // Nominal gaze — clear both timers
+              gazeViolationStartRef.current = null;
+              headViolationStartRef.current = null;
             }
           }
         }

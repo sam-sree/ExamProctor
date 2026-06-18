@@ -143,12 +143,12 @@ export function checkGazeAndPose(faceLandmarks, imageWidth = 640, imageHeight = 
     roll
   };
 
-  // Threshold checks aligned with previous python parameters
-  if (h_ratio < 0.28 || h_ratio > 0.72 || v_ratio < 0.28 || v_ratio > 0.72) {
+  // Threshold checks — widened to reduce false positives from natural head movement
+  if (h_ratio < 0.20 || h_ratio > 0.80 || v_ratio < 0.20 || v_ratio > 0.80) {
     return { event: "GAZE_DEVIATION", confidence: 1.0, metadata };
   }
 
-  if (yawRatio > 1.80 || yawRatio < 0.55 || pitchRatio < 0.22 || pitchRatio > 0.75 || Math.abs(roll) > 20) {
+  if (yawRatio > 2.20 || yawRatio < 0.45 || pitchRatio < 0.18 || pitchRatio > 0.82 || Math.abs(roll) > 28) {
     return { event: "HEAD_POSE_VIOLATION", confidence: 1.0, metadata };
   }
 

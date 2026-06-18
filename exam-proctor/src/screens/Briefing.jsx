@@ -6,6 +6,7 @@ import DisqualificationRiskBar from '../components/DisqualificationRiskBar';
 export default function Briefing({ onEnterExam, onBackToScreenShare }) {
   const [agreed, setAgreed] = useState(false);
   const [fullscreenError, setFullscreenError] = useState('');
+  const [bluetoothAcknowledged, setBluetoothAcknowledged] = useState(false);
   const resetProctoring = useProctoringStore(state => state.resetProctoring);
 
   useEffect(() => {
@@ -22,6 +23,8 @@ export default function Briefing({ onEnterExam, onBackToScreenShare }) {
   ];
 
   const handleStart = async () => {
+    setFullscreenError(''); // Clear previous errors
+
     const requireScreenShare = import.meta.env.VITE_REQUIRE_SCREEN_SHARE !== 'false';
     const screenStream = window.screenShareStream;
     const isSharing = screenStream && screenStream.getVideoTracks().some(track => track.readyState === 'live');
@@ -29,6 +32,20 @@ export default function Briefing({ onEnterExam, onBackToScreenShare }) {
     if (requireScreenShare && !isSharing) {
       setFullscreenError("Your screen share has disconnected. Please go back and set it up again.");
       return;
+    }
+
+    // Bluetooth Check
+    if (!bluetoothAcknowledged && navigator.bluetooth && typeof navigator.bluetooth.getAvailability === 'function') {
+      try {
+        const isBtAvailable = await navigator.bluetooth.getAvailability();
+        if (isBtAvailable) {
+          setFullscreenError("Bluetooth adapter detected. Please disable Bluetooth on your device to prevent the use of unauthorized communication devices. Click 'Enter Exam' again to confirm you have disabled it.");
+          setBluetoothAcknowledged(true);
+          return;
+        }
+      } catch (err) {
+        console.warn("Bluetooth availability check failed or blocked", err);
+      }
     }
 
     try {

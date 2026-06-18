@@ -6,7 +6,7 @@ const calculateBayesianScore = (warningLog, shortcutAttemptLog, bluetoothDeviceD
   const params = {
     "GAZE_DEVIATION":        {cheat: 0.60, honest: 0.15},
     "FACE_ABSENT":           {cheat: 0.50, honest: 0.05},
-    "MULTIPLE_FACES":        {cheat: 0.80, honest: 0.01},
+    "MULTIPLE_FACES":        {cheat: 0.50, honest: 0.08}, // Reduced — detector can misfire on photos/reflections
     "HEAD_POSE_VIOLATION":   {cheat: 0.50, honest: 0.10},
     "BACKGROUND_AUDIO":      {cheat: 0.40, honest: 0.12},
     "WINDOW_BLUR":           {cheat: 0.70, honest: 0.08},
@@ -31,7 +31,7 @@ const calculateBayesianScore = (warningLog, shortcutAttemptLog, bluetoothDeviceD
 
   let odds = priorCheat / priorHonest;
   Object.keys(counts).forEach(k => {
-    const count = Math.min(counts[k], 3);
+    const count = Math.min(counts[k], 8); // Cap at 8 so repeated warnings continue raising the bar
     if (count > 0) {
       odds *= (params[k].cheat / params[k].honest) ** count;
     }
