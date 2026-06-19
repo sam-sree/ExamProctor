@@ -12,6 +12,17 @@ export default function ScreenShareSetup({ onNext }) {
   const startScreenShare = async () => {
     try {
       setError(null);
+
+      // Stop any previously active share before requesting a new one
+      if (stream) {
+        stream.getTracks().forEach(t => t.stop());
+        setStream(null);
+      }
+      if (window.screenShareStream) {
+        window.screenShareStream.getTracks().forEach(t => t.stop());
+        window.screenShareStream = null;
+      }
+
       const mediaStream = await navigator.mediaDevices.getDisplayMedia({
         video: { displaySurface: "monitor" },
         audio: false

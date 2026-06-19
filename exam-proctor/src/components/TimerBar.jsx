@@ -1,8 +1,8 @@
 import React from 'react';
 import { useExamTimer } from '../hooks/useExamTimer';
 
-export default function TimerBar({ initialSeconds, onTimeUp }) {
-  const { formatted, isWarning, isDanger, progressPercent } = useExamTimer(initialSeconds);
+export default function TimerBar({ initialSeconds, onTimeUp, isPaused }) {
+  const { formatted, isWarning, isDanger, progressPercent } = useExamTimer(initialSeconds, isPaused);
   
   React.useEffect(() => {
     if (progressPercent <= 0 && onTimeUp) {

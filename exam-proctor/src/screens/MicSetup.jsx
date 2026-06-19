@@ -4,7 +4,12 @@ import VolumeHeatBar from '../components/VolumeHeatBar';
 import { CheckCircle2, AlertCircle } from 'lucide-react';
 
 export default function MicSetup({ onNext }) {
-  const { level, isActive, isCalibrating, hasSpiked, error, startMonitor } = useAudioMonitor();
+  const { level, isActive, isCalibrating, hasSpiked, error, startMonitor, stopMonitor } = useAudioMonitor();
+
+  const handleNext = () => {
+    stopMonitor(); // Explicitly stop mic stream before leaving this screen
+    onNext();
+  };
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '48px 24px' }}>
@@ -78,7 +83,7 @@ export default function MicSetup({ onNext }) {
         )}
 
         <button 
-          onClick={onNext}
+          onClick={handleNext}
           disabled={!hasSpiked}
           style={{
             width: '100%',

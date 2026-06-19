@@ -4,6 +4,36 @@ import { useExamStore } from '../store/examStore';
 import { FilesetResolver, FaceLandmarker } from "@mediapipe/tasks-vision";
 import { analyzeBrightness, analyzeFaces, checkGazeAndPose } from '../utils/localCV';
 
+// Module-level singleton: FaceLandmarker is expensive to initialize.
+// Reuse the same instance across CameraSetup and Exam instead of creating it twice.
+let _landmarkerInstance = null;
+let _landmarkerInitPromise = null;
+
+async function getSharedLandmarker() {
+  if (_landmarkerInstance) return _landmarkerInstance;
+  if (_landmarkerInitPromise) return await _landmarkerInitPromise;
+
+  _landmarkerInitPromise = (async () => {
+    console.log("[useCVEvents] Loading FaceLandmarker WebAssembly engine...");
+    const vision = await FilesetResolver.forVisionTasks(
+      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.15/wasm"
+    );
+    const landmarker = await FaceLandmarker.createFromOptions(vision, {
+      baseOptions: {
+        modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+        delegate: "GPU"
+      },
+      runningMode: "VIDEO",
+      numFaces: 2
+    });
+    _landmarkerInstance = landmarker;
+    console.log("[useCVEvents] Local FaceLandmarker ready.");
+    return landmarker;
+  })();
+
+  return await _landmarkerInitPromise;
+}
+
 export function useCVEvents(isEnabled = false, isExam = false) {
   const [isConnected, setIsConnected] = useState(false);
   const [lastFaceEvent, setLastFaceEvent] = useState(null);
@@ -204,22 +234,9 @@ export function useCVEvents(isEnabled = false, isExam = false) {
         canvas.height = 480;
         canvasRef.current = canvas;
 
-        // Initialize local WebAssembly MediaPipe task
-        console.log("[useCVEvents] Loading FaceLandmarker WebAssembly engine...");
-        const vision = await FilesetResolver.forVisionTasks(
-          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.15/wasm"
-        );
-        const landmarker = await FaceLandmarker.createFromOptions(vision, {
-          baseOptions: {
-            modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
-            delegate: "GPU"
-          },
-          runningMode: "VIDEO",
-          numFaces: 2
-        });
+        // Initialize local WebAssembly MediaPipe task (shared singleton)
+        const landmarker = await getSharedLandmarker();
         landmarkerRef.current = landmarker;
-        console.log("[useCVEvents] Local FaceLandmarker ready.");
-
         setIsConnected(true);
         runCaptureLoop();
       } catch (err) {
@@ -290,11 +307,7 @@ export function useCVEvents(isEnabled = false, isExam = false) {
     useProctoringStore.setState({ faceViolationActive: false, faceViolationType: null, roomTooDark: false });
 
     if (landmarkerRef.current) {
-      try {
-        landmarkerRef.current.close();
-      } catch (e) {
-        console.error("[useCVEvents] Error closing FaceLandmarker:", e);
-      }
+      // Don't close the shared singleton — just release our local reference.
       landmarkerRef.current = null;
     }
 

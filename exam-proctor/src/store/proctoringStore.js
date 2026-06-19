@@ -75,8 +75,11 @@ export const useProctoringStore = create((set, get) => ({
     const state = get();
     
     // Paused State Immunity
-    if (!bypassImmunity && (state.isFullscreenExited || state.isConnectionLost || state.faceViolationActive || state.isScreenShareEnded)) {
-      return; 
+    if (!bypassImmunity) {
+      if (state.isConnectionLost || state.isScreenShareEnded || state.isFullscreenExited) return;
+      
+      const isCVWarning = ['GAZE_DEVIATION', 'FACE_ABSENT', 'MULTIPLE_FACES', 'HEAD_POSE_VIOLATION'].includes(type);
+      if (state.faceViolationActive && isCVWarning) return;
     }
 
     // 1-Second Cascade Cooldown

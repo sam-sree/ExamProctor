@@ -27,10 +27,7 @@ export default function Disqualified({ onExit }) {
     'FULLSCREEN_EXIT_TIMEOUT': 'Remained out of fullscreen mode for more than 5 seconds'
   };
 
-  const handleExit = async () => {
-    if (window.electronAPI) {
-      await window.electronAPI.enableBluetooth();
-    }
+  const handleExit = () => {
     onExit();
   };
 

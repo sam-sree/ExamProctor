@@ -105,8 +105,12 @@ async def submit_session(session_id: str, payload: Dict[str, Any]):
         session_data["status"] = "disqualified"
         session_data["score"]["trustworthiness"] = None
     else:
-        session_data["score"]["trustworthiness"] = res["trustworthinessScore"]
-        session_data["status"] = res["classification"]
+        if session_data.get("disqualified") == True:
+            session_data["score"]["trustworthiness"] = None
+            session_data["status"] = "disqualified"
+        else:
+            session_data["score"]["trustworthiness"] = res["trustworthinessScore"]
+            session_data["status"] = res["classification"]
         
     return {"received": True}
 

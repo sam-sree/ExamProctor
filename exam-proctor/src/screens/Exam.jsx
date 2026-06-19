@@ -32,6 +32,7 @@ export default function Exam({ onDisqualified, onFinished }) {
   const [screenShareError, setScreenShareError] = useState(null);
 
   const screenShareTimerRef = useRef(null);
+  const handleSubmitRef = useRef(null);
 
   const question = QUESTIONS[currentIndex];
   
@@ -70,13 +71,6 @@ export default function Exam({ onDisqualified, onFinished }) {
     setCurrentAnswer(existing ? existing.answer : (question.type === 'text' ? '' : null));
     setTimeSpent(0);
   }, [currentIndex, question.id, answers]);
-
-  // Stop audio monitor when exam is no longer active (submitted/disqualified)
-  useEffect(() => {
-    if (!isExamActive) {
-      stopAudioMonitor();
-    }
-  }, [isExamActive]);
 
   // Handle Question Timer spent seconds (increment only when not paused)
   useEffect(() => {
@@ -142,7 +136,7 @@ export default function Exam({ onDisqualified, onFinished }) {
 
       // Start 15s automatic submission countdown
       screenShareTimerRef.current = setTimeout(() => {
-        handleSubmit();
+        if (handleSubmitRef.current) handleSubmitRef.current();
       }, 15000);
     };
 
@@ -154,16 +148,21 @@ export default function Exam({ onDisqualified, onFinished }) {
     }
 
     // C. Browser Event Monitors
+    
+    // Window focus / blur
+    let blurTimer = null;
+
     // Tab switching / visibility
     const handleVisibilityChange = () => {
       if (document.hidden) {
         useProctoringStore.getState().fireWarning('TAB_SWITCH');
+        if (blurTimer) {
+          clearTimeout(blurTimer);
+          blurTimer = null;
+        }
       }
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    // Window focus / blur
-    let blurTimer = null;
     const handleBlur = () => {
       blurTimer = setTimeout(() => {
         if (document.hidden) return; // already counted by tab switch
@@ -355,7 +354,7 @@ export default function Exam({ onDisqualified, onFinished }) {
           setIsScreenShareEnded(true);
           useProctoringStore.setState({ isScreenShareEnded: true });
           screenShareTimerRef.current = setTimeout(() => {
-            handleSubmit();
+            if (handleSubmitRef.current) handleSubmitRef.current();
           }, 15000);
         });
       }
@@ -413,6 +412,8 @@ export default function Exam({ onDisqualified, onFinished }) {
 
     onFinished();
   };
+
+  handleSubmitRef.current = handleSubmit;
 
   if (showSubmitConfirm) {
     const answeredCount = answers.filter(a => !a.skipped).length;
